@@ -3,6 +3,9 @@ package topics
 import (
 	"github.com/4chain-ag/go-overlay-services/pkg/engine"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
+	"github.com/bsv-blockchain/go-sdk/chainhash"
+	"github.com/bsv-blockchain/go-sdk/overlay"
+	"github.com/bsv-blockchain/go-sdk/script"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 )
 
@@ -21,6 +24,14 @@ func NewBsv21TopicManager(tokenIds []string) (tm *bsv21TopicManager) {
 	return
 }
 
+func (tm *bsv21TopicManager) HasTokenId(tokenId string) bool {
+	if tm.tokenIds == nil {
+		return true
+	}
+	_, ok := tm.tokenIds[tokenId]
+	return ok
+}
+
 type tokenSummary struct {
 	tokensIn  uint64
 	tokensOut uint64
@@ -28,9 +39,11 @@ type tokenSummary struct {
 	deploy    bool
 }
 
-func (tm *bsv21TopicManager) IdentifyAdmissableOutputs(tx *transaction.Transaction, loadInput func(uint32) (*engine.Output, error)) (result engine.TopicResult, err error) {
-	admit := &result.Admit
-
+func (tm *bsv21TopicManager) IdentifyAdmissableOutputs(beef *transaction.Beef, txid *chainhash.Hash, previousCoins []uint32) (admit overlay.AdmittanceInstructions, err error) {
+	tx := beef.FindTransaction(txid.String())
+	if tx == nil {
+		return admit, engine.ErrNotFound
+	}
 	summary := make(map[string]*tokenSummary)
 	for vout, output := range tx.Outputs {
 		if b := bsv21.Decode(output.LockingScript); b != nil {
@@ -39,7 +52,6 @@ func (tm *bsv21TopicManager) IdentifyAdmissableOutputs(tx *transaction.Transacti
 			}
 
 			if b.Op == string(bsv21.OpMint) {
-				admit.CoinsToRetain = append(admit.CoinsToRetain, uint32(vout))
 				continue
 			}
 			if token, ok := summary[b.Id]; !ok {
@@ -55,23 +67,25 @@ func (tm *bsv21TopicManager) IdentifyAdmissableOutputs(tx *transaction.Transacti
 	}
 
 	if len(summary) > 0 {
-		for vin, _ := range tx.Inputs {
-			admit.CoinsToRetain = append(admit.CoinsToRetain, uint32(vin))
-			if output, err := loadInput(uint32(vin)); err != nil {
-				return result, err
-			} else if output == nil {
-				return result, engine.ErrMissingInput
+		for _, vin := range previousCoins {
+			txin := tx.Inputs[vin]
+			var lockingScript *script.Script
+			if inTx := beef.FindTransaction(txin.SourceTXID.String()); inTx == nil {
+				err = engine.ErrMissingInput
+				return
 			} else {
-				if b := bsv21.Decode(output.Script); b != nil {
-					if !tm.HasTokenId(b.Id) {
-						continue
-					}
+				lockingScript = inTx.Outputs[txin.SourceTxOutIndex].LockingScript
+			}
 
-					if token, ok := summary[b.Id]; !ok {
-						continue
-					} else {
-						token.tokensIn += b.Amt
-					}
+			if b := bsv21.Decode(lockingScript); b != nil {
+				if !tm.HasTokenId(b.Id) {
+					continue
+				}
+				admit.CoinsToRetain = append(admit.CoinsToRetain, uint32(vin))
+				if token, ok := summary[b.Id]; !ok {
+					continue
+				} else {
+					token.tokensIn += b.Amt
 				}
 			}
 		}
@@ -85,10 +99,62 @@ func (tm *bsv21TopicManager) IdentifyAdmissableOutputs(tx *transaction.Transacti
 	return
 }
 
-func (tm *bsv21TopicManager) HasTokenId(tokenId string) bool {
-	if tm.tokenIds == nil {
-		return true
+func (tm *bsv21TopicManager) IdentifyNeededInputs(beef *transaction.Beef, txid *chainhash.Hash) (inputs []*overlay.Outpoint, err error) {
+	tx := beef.FindTransaction(txid.String())
+	if tx == nil {
+		return nil, engine.ErrNotFound
 	}
-	_, ok := tm.tokenIds[tokenId]
-	return ok
+	tokens := make(map[string]struct{})
+	for _, output := range tx.Outputs {
+		if b := bsv21.Decode(output.LockingScript); b != nil {
+			if !tm.HasTokenId(b.Id) {
+				continue
+			}
+			tokens[b.Id] = struct{}{}
+		}
+	}
+
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+
+	for _, txin := range tx.Inputs {
+		var lockingScript *script.Script
+		if inTx := beef.FindTransaction(txin.SourceTXID.String()); inTx == nil {
+			err = engine.ErrMissingInput
+			return
+		} else {
+			lockingScript = inTx.Outputs[txin.SourceTxOutIndex].LockingScript
+		}
+
+		if b := bsv21.Decode(lockingScript); b != nil {
+			if !tm.HasTokenId(b.Id) {
+				continue
+			}
+			inputs = append(inputs, &overlay.Outpoint{
+				Txid:        *txin.SourceTXID,
+				OutputIndex: txin.SourceTxOutIndex,
+			})
+
+		}
+	}
+	return
 }
+
+func (tm *bsv21TopicManager) GetDocumentation() string {
+	return "BSV21 Topic Manager"
+}
+
+func (tm *bsv21TopicManager) GetMetaData() *overlay.MetaData {
+	return &overlay.MetaData{
+		Name: "BSV21",
+	}
+}
+
+// type TopicManager interface {
+// 	IdentifyAdmissableOutputs(beef *transaction.Beef, txid *chainhash.Hash, previousCoins map[uint32]*engine.Output) (overlay.AdmittanceInstructions, error)
+// 	IdentifyNeededInputs(beef *transaction.Beef, txid *chainhash.Hash) ([]*overlay.Outpoint, error)
+// 	GetDependencies() []string
+// 	GetDocumentation() string
+// 	GetMetaData() *overlay.MetaData
+// }
