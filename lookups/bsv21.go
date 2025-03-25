@@ -8,7 +8,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/4chain-ag/go-overlay-services/pkg/engine"
+	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
@@ -40,6 +40,16 @@ func NewBsv21Lookup(storage engine.Storage, dbPath string) *Bsv21Lookup {
 	}
 	if l.db, err = sql.Open("sqlite3", dbPath); err != nil {
 		log.Panic(err)
+	} else if _, err = l.db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		log.Panic(err)
+	} else if _, err = l.db.Exec("PRAGMA synchronous=NORMAL;"); err != nil {
+		log.Panic(err)
+	} else if _, err = l.db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		log.Panic(err)
+	} else if _, err = l.db.Exec("PRAGMA temp_store=MEMORY;"); err != nil {
+		log.Panic(err)
+	} else if _, err = l.db.Exec("PRAGMA mmap_size=30000000000;"); err != nil {
+		log.Panic(err)
 	} else if _, err = l.db.Exec(`CREATE TABLE IF NOT EXISTS events(
 		event TEXT, 
 		outpoint TEXT,
@@ -49,7 +59,7 @@ func NewBsv21Lookup(storage engine.Storage, dbPath string) *Bsv21Lookup {
 		PRIMARY KEY(outpoint, event)
 	)`); err != nil {
 		log.Panic(err)
-	} else if _, err = l.db.Exec(`CREATE INDEX IF NOT EXISTS idx_events_event ON bsv21(event, height, idx)`); err != nil {
+	} else if _, err = l.db.Exec(`CREATE INDEX IF NOT EXISTS idx_events_event ON events(event, height, idx)`); err != nil {
 		log.Panic(err)
 	} else if l.insEvent, err = l.db.Prepare(`INSERT INTO events(event, outpoint, height, idx) 
 		VALUES(?1, ?2, ?3, ?4)
@@ -61,6 +71,7 @@ func NewBsv21Lookup(storage engine.Storage, dbPath string) *Bsv21Lookup {
 	} else if l.delOutpoint, err = l.db.Prepare(`DELETE FROM events WHERE outpoint = ?`); err != nil {
 		log.Panic(err)
 	}
+	l.db.SetMaxOpenConns(1)
 	return l
 }
 
@@ -74,7 +85,7 @@ func (l *Bsv21Lookup) saveEvent(event string, output *engine.Output) error {
 	return err
 }
 
-func (l *Bsv21Lookup) OutputAdded(output *engine.Output) error {
+func (l *Bsv21Lookup) OutputAdded(ctx context.Context, output *engine.Output) error {
 	if b := bsv21.Decode(output.Script); b != nil {
 		var idEvt string
 		if b.Op == string(bsv21.OpMint) {
@@ -90,14 +101,14 @@ func (l *Bsv21Lookup) OutputAdded(output *engine.Output) error {
 	return nil
 }
 
-func (l *Bsv21Lookup) OutputSpent(outpoint *overlay.Outpoint, _ string) error {
+func (l *Bsv21Lookup) OutputSpent(ctx context.Context, outpoint *overlay.Outpoint, _ string) error {
 	if _, err := l.updSpent.Exec(outpoint.String()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (l *Bsv21Lookup) OutputDeleted(outpoint *overlay.Outpoint, topic string) error {
+func (l *Bsv21Lookup) OutputDeleted(ctx context.Context, outpoint *overlay.Outpoint, topic string) error {
 	if _, err := l.delOutpoint.Exec(outpoint.String()); err != nil {
 		return err
 	}
@@ -157,8 +168,12 @@ func (l *Bsv21Lookup) GetDocumentation() string {
 	return "BSV21 lookup"
 }
 
-func (l *Bsv21Lookup) GetMetaData() overlay.MetaData {
-	return overlay.MetaData{
+func (l *Bsv21Lookup) GetMetaData() *overlay.MetaData {
+	return &overlay.MetaData{
 		Name: "BSV21",
 	}
+}
+
+func (l *Bsv21Lookup) Close() {
+	l.db.Close()
 }
