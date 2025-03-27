@@ -77,6 +77,7 @@ func main() {
 		if tx, err := loadTx(ctx, txid); err != nil {
 			panic(err)
 		} else {
+			merklePath := tx.MerklePath
 			tx.MerklePath = nil
 			for _, input := range tx.Inputs {
 				sourceTxid := input.SourceTXID.String()
@@ -97,6 +98,12 @@ func main() {
 			} else if s, err := json.Marshal(steak); err != nil {
 				panic(err)
 			} else {
+				if merklePath != nil {
+					if err := e.HandleNewMerkleProof(ctx, tx.TxID(), merklePath); err != nil {
+						panic(err)
+					}
+					log.Println("Merkle proof for", txid, "updated")
+				}
 				log.Println("Processed", txid, "in", time.Since(start), "as", string(s))
 				start = time.Now()
 			}
