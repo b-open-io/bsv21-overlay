@@ -30,13 +30,14 @@ func NewSQLiteStorage(conn string) (*SQLiteStorage, error) {
 		return nil, err
 	} else if _, err = wdb.Exec("PRAGMA mmap_size=30000000000;"); err != nil {
 		return nil, err
-	} else if _, err = wdb.Exec(`CREATE TABLE IF NOT EXISTS transactions(
-		txid TEXT PRIMARY KEY,
-		beef BLOB NOT NULL,
-		created_at TEXT NOT NULL DEFAULT current_timestamp,
-		updated_at TEXT NOT NULL DEFAULT current_timestamp
-	)`); err != nil {
-		return nil, err
+		// } else if _, err = wdb.Exec(`CREATE TABLE IF NOT EXISTS transactions(
+		// 	txid TEXT PRIMARY KEY,
+		// 	beef BLOB NOT NULL,
+		// 	topic TEXT,
+		// 	created_at TEXT NOT NULL DEFAULT current_timestamp,
+		// 	updated_at TEXT NOT NULL DEFAULT current_timestamp
+		// )`); err != nil {
+		// 	return nil, err
 	} else if _, err = wdb.Exec(`CREATE TABLE IF NOT EXISTS outputs(
 		outpoint TEXT NOT NULL,
 		topic TEXT NOT NULL,
@@ -44,8 +45,10 @@ func NewSQLiteStorage(conn string) (*SQLiteStorage, error) {
 		idx BIGINT NOT NULL DEFAULT 0,
 		satoshis BIGINT NOT NULL,
 		script BLOB NOT NULL,
+		beef BLOB NOT NULL,
 		consumes TEXT NOT NULL DEFAULT '[]',
 		consumed_by TEXT NOT NULL DEFAULT '[]',
+		dependencies TEXT NOT NULL DEFAULT '[]',
 		spent BOOL NOT NULL DEFAULT false,
 		created_at TEXT NOT NULL DEFAULT current_timestamp,
 		updated_at TEXT NOT NULL DEFAULT current_timestamp,
@@ -93,9 +96,15 @@ func (s *SQLiteStorage) InsertOutput(ctx context.Context, utxo *engine.Output) (
 			return
 		}
 	}
-	if _, err = s.wDB.ExecContext(ctx, `
-        INSERT INTO outputs(topic, outpoint, height, idx, satoshis, script, spent, consumes)
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+	dependencies := []byte("[]")
+	if len(utxo.Dependencies) > 0 {
+		if dependencies, err = json.Marshal(utxo.Dependencies); err != nil {
+			return
+		}
+	}
+	_, err = s.wDB.ExecContext(ctx, `
+        INSERT INTO outputs(topic, outpoint, height, idx, satoshis, script, spent, consumes, dependencies, beef)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(outpoint, topic) DO NOTHING`,
 		utxo.Topic,
 		utxo.Outpoint.String(),
@@ -105,19 +114,9 @@ func (s *SQLiteStorage) InsertOutput(ctx context.Context, utxo *engine.Output) (
 		utxo.Script,
 		utxo.Spent,
 		consumed,
-	); err != nil {
-		return err
-	} else if len(utxo.Beef) > 0 {
-		if _, err = s.wDB.ExecContext(ctx, `
-			INSERT INTO transactions(txid, beef)
-			VALUES(?1, ?2)
-			ON CONFLICT(txid) DO NOTHING`,
-			utxo.Outpoint.Txid.String(),
-			utxo.Beef,
-		); err != nil {
-			return err
-		}
-	}
+		dependencies,
+		utxo.Beef,
+	)
 	return
 }
 
@@ -125,7 +124,7 @@ func (s *SQLiteStorage) FindOutput(ctx context.Context, outpoint *overlay.Outpoi
 	output = &engine.Output{
 		Outpoint: *outpoint,
 	}
-	query := `SELECT topic, height, idx, satoshis, script, spent, consumes, consumed_by
+	query := `SELECT topic, height, idx, satoshis, script, spent, consumes, consumed_by, dependencies, beef
         FROM outputs
         WHERE outpoint = ? `
 	args := []interface{}{outpoint.String()}
@@ -139,6 +138,7 @@ func (s *SQLiteStorage) FindOutput(ctx context.Context, outpoint *overlay.Outpoi
 	}
 	var consumes []byte
 	var consumedBy []byte
+	var dependencies []byte
 	if err := s.rDB.QueryRowContext(ctx, query, args...).Scan(
 		&output.Topic,
 		&output.BlockHeight,
@@ -148,8 +148,10 @@ func (s *SQLiteStorage) FindOutput(ctx context.Context, outpoint *overlay.Outpoi
 		&output.Spent,
 		&consumes,
 		&consumedBy,
+		&dependencies,
+		&output.Beef,
 	); err == sql.ErrNoRows {
-		return nil, engine.ErrNotFound
+		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
@@ -157,15 +159,8 @@ func (s *SQLiteStorage) FindOutput(ctx context.Context, outpoint *overlay.Outpoi
 		return nil, err
 	} else if err := json.Unmarshal(consumedBy, &output.ConsumedBy); err != nil {
 		return nil, err
-	} else if includeBEEF {
-		if err := s.rDB.QueryRowContext(ctx, `
-			SELECT beef
-			FROM transactions
-			WHERE txid = ?`,
-			outpoint.Txid.String(),
-		).Scan(&output.Beef); err != nil {
-			return nil, err
-		}
+	} else if err := json.Unmarshal(dependencies, &output.Dependencies); err != nil {
+		return nil, err
 	}
 	return
 }
@@ -177,7 +172,7 @@ func (s *SQLiteStorage) FindOutputs(ctx context.Context, outpoints []*overlay.Ou
 	}
 
 	var query strings.Builder
-	query.WriteString(`SELECT topic, outpoint, height, idx, satoshis, script, spent, consumes, consumed_by
+	query.WriteString(`SELECT topic, outpoint, height, idx, satoshis, script, spent, consumes, consumed_by, dependencies, beef
         FROM outputs
         WHERE outpoint IN (` + placeholders(len(outpoints)) + ") ")
 	args := make([]interface{}, 0, len(outpoints)+2)
@@ -201,6 +196,7 @@ func (s *SQLiteStorage) FindOutputs(ctx context.Context, outpoints []*overlay.Ou
 		output := &engine.Output{}
 		var consumes []byte
 		var consumedBy []byte
+		var dependencies []byte
 		var op string
 		if err := rows.Scan(
 			&output.Topic,
@@ -212,6 +208,8 @@ func (s *SQLiteStorage) FindOutputs(ctx context.Context, outpoints []*overlay.Ou
 			&output.Spent,
 			&consumes,
 			&consumedBy,
+			&dependencies,
+			&output.Beef,
 		); err != nil {
 			return nil, err
 		} else if outpoint, err := overlay.NewOutpointFromString(op); err != nil {
@@ -220,18 +218,10 @@ func (s *SQLiteStorage) FindOutputs(ctx context.Context, outpoints []*overlay.Ou
 			return nil, err
 		} else if err := json.Unmarshal(consumedBy, &output.ConsumedBy); err != nil {
 			return nil, err
+		} else if err := json.Unmarshal(dependencies, &output.Dependencies); err != nil {
+			return nil, err
 		} else {
 			output.Outpoint = *outpoint
-		}
-		if includeBEEF {
-			if err := s.rDB.QueryRowContext(ctx, `
-				SELECT beef
-				FROM transactions
-				WHERE txid = ?`,
-				output.Outpoint.Txid.String(),
-			).Scan(&output.Beef); err != nil {
-				return nil, err
-			}
 		}
 		outputs = append(outputs, output)
 
@@ -241,7 +231,7 @@ func (s *SQLiteStorage) FindOutputs(ctx context.Context, outpoints []*overlay.Ou
 
 func (s *SQLiteStorage) FindOutputsForTransaction(ctx context.Context, txid *chainhash.Hash, includeBEEF bool) ([]*engine.Output, error) {
 	var outputs []*engine.Output
-	query := `SELECT topic, outpoint, height, idx, satoshis, script, spent, consumes, consumed_by
+	query := `SELECT topic, outpoint, height, idx, satoshis, script, spent, consumes, consumed_by, dependencies, beef
         FROM outputs
         WHERE outpoint LIKE ?
         ORDER BY outpoint ASC`
@@ -254,6 +244,7 @@ func (s *SQLiteStorage) FindOutputsForTransaction(ctx context.Context, txid *cha
 		output := &engine.Output{}
 		var consumes []byte
 		var consumedBy []byte
+		var dependencies []byte
 		var op string
 		if err := rows.Scan(
 			&output.Topic,
@@ -265,6 +256,8 @@ func (s *SQLiteStorage) FindOutputsForTransaction(ctx context.Context, txid *cha
 			&output.Spent,
 			&consumes,
 			&consumedBy,
+			&dependencies,
+			&output.Beef,
 		); err != nil {
 			return nil, err
 		} else if outpoint, err := overlay.NewOutpointFromString(op); err != nil {
@@ -273,18 +266,10 @@ func (s *SQLiteStorage) FindOutputsForTransaction(ctx context.Context, txid *cha
 			return nil, err
 		} else if err := json.Unmarshal(consumedBy, &output.ConsumedBy); err != nil {
 			return nil, err
+		} else if err := json.Unmarshal(dependencies, &output.Dependencies); err != nil {
+			return nil, err
 		} else {
 			output.Outpoint = *outpoint
-		}
-		if includeBEEF {
-			if err := s.rDB.QueryRowContext(ctx, `
-				SELECT beef
-				FROM transactions
-				WHERE txid = ?`,
-				txid.String(),
-			).Scan(&output.Beef); err != nil {
-				return nil, err
-			}
 		}
 		outputs = append(outputs, output)
 	}
@@ -294,7 +279,7 @@ func (s *SQLiteStorage) FindOutputsForTransaction(ctx context.Context, txid *cha
 func (s *SQLiteStorage) FindUTXOsForTopic(ctx context.Context, topic string, since uint32, includeBEEF bool) ([]*engine.Output, error) {
 	var outputs []*engine.Output
 	query := `
-        SELECT outpoint, height, idx, satoshis, script, spent, consumes, consumed_by
+        SELECT outpoint, height, idx, satoshis, script, spent, consumes, consumed_by, beef
         FROM outputs
         WHERE topic = ? AND height >= ?
         ORDER BY height ASC, idx ASC`
@@ -319,6 +304,7 @@ func (s *SQLiteStorage) FindUTXOsForTopic(ctx context.Context, topic string, sin
 			&output.Spent,
 			&consumes,
 			&consumedBy,
+			&output.Beef,
 		); err != nil {
 			return nil, err
 		} else if outpoint, err := overlay.NewOutpointFromString(op); err != nil {
@@ -329,16 +315,6 @@ func (s *SQLiteStorage) FindUTXOsForTopic(ctx context.Context, topic string, sin
 			return nil, err
 		} else {
 			output.Outpoint = *outpoint
-		}
-		if includeBEEF {
-			if err := s.rDB.QueryRowContext(ctx, `
-				SELECT beef
-				FROM transactions
-				WHERE txid = ?`,
-				output.Outpoint.Txid.String(),
-			).Scan(&output.Beef); err != nil {
-				return nil, err
-			}
 		}
 		outputs = append(outputs, output)
 	}
@@ -420,6 +396,20 @@ func (s *SQLiteStorage) UpdateTransactionBEEF(ctx context.Context, txid *chainha
 	return err
 }
 
+func (s *SQLiteStorage) UpdateOutputBEEF(ctx context.Context, outpoint *overlay.Outpoint, topic string, beef []byte, blockHeight uint32, blockIndex uint64) error {
+	_, err := s.wDB.ExecContext(ctx, `
+		UPDATE outputs
+		SET beef = ?, height = ?, idx = ?
+		WHERE topic = ? AND outpoint = ?`,
+		beef,
+		blockHeight,
+		blockIndex,
+		topic,
+		outpoint.String(),
+	)
+	return err
+}
+
 func (s *SQLiteStorage) UpdateOutputBlockHeight(ctx context.Context, outpoint *overlay.Outpoint, topic string, blockHeight uint32, blockIndex uint64) error {
 	_, err := s.wDB.ExecContext(ctx, `
         UPDATE outputs
@@ -464,12 +454,4 @@ func placeholders(n int) string {
 		return ""
 	}
 	return "?" + strings.Repeat(",?", n-1)
-}
-
-func toInterfaceSlice(strs []string) []interface{} {
-	ifaces := make([]interface{}, len(strs))
-	for i, s := range strs {
-		ifaces[i] = s
-	}
-	return ifaces
 }

@@ -17,6 +17,7 @@ import (
 	sqlite "github.com/b-open-io/bsv21-overlay/storage"
 	"github.com/b-open-io/bsv21-overlay/sub"
 	"github.com/b-open-io/bsv21-overlay/topics"
+	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
@@ -70,18 +71,19 @@ func main() {
 	rows, err := sub.QueueDb.Query(`SELECT txid FROM queue ORDER BY height, idx`)
 	for rows.Next() {
 		start := time.Now()
-		var txid string
-		if err := rows.Scan(&txid); err != nil {
+		var txidStr string
+		if err := rows.Scan(&txidStr); err != nil {
 			panic(err)
 		}
-		if tx, err := loadTx(ctx, txid); err != nil {
+		if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
+			panic(err)
+		} else if tx, err := loadTx(ctx, txid); err != nil {
 			panic(err)
 		} else {
 			merklePath := tx.MerklePath
 			tx.MerklePath = nil
 			for _, input := range tx.Inputs {
-				sourceTxid := input.SourceTXID.String()
-				if input.SourceTransaction, err = loadTx(ctx, sourceTxid); err != nil {
+				if input.SourceTransaction, err = loadTx(ctx, input.SourceTXID); err != nil {
 					panic(err)
 				}
 			}
@@ -91,9 +93,9 @@ func main() {
 			log.Println("Processing", txid)
 			if taggedBeef.Beef, err = tx.AtomicBEEF(false); err != nil {
 				panic(err)
+			} else if _, _, _, err := transaction.ParseBeef(taggedBeef.Beef); err != nil {
+				log.Panicf("Error parsing beef %s: %x", txid, taggedBeef.Beef)
 			} else if steak, err := e.Submit(ctx, taggedBeef, engine.SubmitModeHistorical, nil); err != nil {
-				panic(err)
-			} else if _, err := sub.QueueDb.Exec(`DELETE FROM queue WHERE txid = ?`, txid); err != nil {
 				panic(err)
 			} else if s, err := json.Marshal(steak); err != nil {
 				panic(err)
@@ -103,6 +105,9 @@ func main() {
 						panic(err)
 					}
 					log.Println("Merkle proof for", txid, "updated")
+				}
+				if _, err := sub.QueueDb.Exec(`DELETE FROM queue WHERE txid = ?`, txid.String()); err != nil {
+					panic(err)
 				}
 				log.Println("Processed", txid, "in", time.Since(start), "as", string(s))
 				start = time.Now()
@@ -114,11 +119,19 @@ func main() {
 	bsv21Lookup.Close()
 }
 
-func loadTx(ctx context.Context, txid string) (*transaction.Transaction, error) {
+func loadTx(ctx context.Context, txid *chainhash.Hash) (*transaction.Transaction, error) {
 	start := time.Now()
-	if beef, err := os.ReadFile(fmt.Sprintf("%s/%s.beef", CACHE_DIR, txid)); err == nil {
-		return transaction.NewTransactionFromBEEF(beef)
-	} else if t, err := jb.GetTransaction(ctx, txid); err != nil {
+	txidStr := txid.String()
+	if beefBytes, err := os.ReadFile(fmt.Sprintf("%s/%s.beef", CACHE_DIR, txid)); err == nil {
+		if tx, err := transaction.NewTransactionFromBEEF(beefBytes); err != nil {
+			log.Println("Error loading beef", err)
+		} else if tx == nil {
+			log.Println("Missing tx", txid)
+		} else {
+			return tx, nil
+		}
+	}
+	if t, err := jb.GetTransaction(ctx, txidStr); err != nil {
 		panic(err)
 	} else if tx, err := transaction.NewTransactionFromBytes(t.Transaction); err != nil {
 		panic(err)
@@ -137,14 +150,14 @@ func loadTx(ctx context.Context, txid string) (*transaction.Transaction, error) 
 		} else {
 			tx.MerklePath = merklePath
 		}
-		if beef, err := tx.AtomicBEEF(false); err != nil {
+		if beefBytes, err := tx.AtomicBEEF(false); err != nil {
 			panic(err)
-		} else if err := os.WriteFile(fmt.Sprintf("%s/%s.beef", CACHE_DIR, txid), beef, 0644); err != nil {
+		} else if err := os.WriteFile(fmt.Sprintf("%s/%s.beef", CACHE_DIR, txid), beefBytes, 0644); err != nil {
 			panic(err)
 		}
 		log.Println(txid, " loaded in ", time.Since(start))
 		return tx, nil
 	} else {
-		return nil, errors.New("missing-tx" + txid)
+		return nil, errors.New("missing-tx" + txidStr)
 	}
 }

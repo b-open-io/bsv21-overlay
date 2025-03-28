@@ -16,6 +16,7 @@ import (
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
 )
 
@@ -42,6 +43,9 @@ func init() {
 }
 
 func main() {
+	log.Println("TOPIC_DB", os.Getenv("TOPIC_DB"))
+	log.Println("LOOKUP_DB", os.Getenv("LOOKUP_DB"))
+	log.Println("CACHE_DIR", os.Getenv("CACHE_DIR"))
 	storage, err := sqlite.NewSQLiteStorage(os.Getenv("TOPIC_DB"))
 	if err != nil {
 		panic(err)
@@ -64,8 +68,8 @@ func main() {
 			"bsv21": {
 				Type: engine.SyncConfigurationPeers,
 				Peers: []string{
-					"http://localhost:3000",
-					"http://localhost:3001",
+					"http://morovol:3000",
+					"http://morovol:3001",
 				},
 			},
 		},
@@ -77,6 +81,7 @@ func main() {
 	}
 	// Create a new Fiber app
 	app := fiber.New()
+	app.Use(logger.New())
 
 	// Define a simple GET route
 	app.Get("/", func(c *fiber.Ctx) error {
