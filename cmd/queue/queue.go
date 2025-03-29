@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
+	"github.com/4chain-ag/go-overlay-services/pkg/core/engine/storage"
 	"github.com/GorillaPool/go-junglebus"
 	"github.com/b-open-io/bsv21-overlay/lookups"
-	sqlite "github.com/b-open-io/bsv21-overlay/storage"
 	"github.com/b-open-io/bsv21-overlay/sub"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
@@ -44,7 +44,7 @@ func init() {
 
 func main() {
 	ctx := context.Background()
-	storage, err := sqlite.NewSQLiteStorage(os.Getenv("TOPIC_DB"))
+	storage, err := storage.NewSQLiteStorage(os.Getenv("TOPIC_DB"))
 	if err != nil {
 		panic(err)
 	}
