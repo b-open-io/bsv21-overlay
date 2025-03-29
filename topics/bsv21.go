@@ -2,11 +2,11 @@ package topics
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
-	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/script"
 	"github.com/bsv-blockchain/go-sdk/transaction"
@@ -85,21 +85,25 @@ func (tm *Bsv21TopicManager) IdentifyAdmissableOutputs(ctx context.Context, beef
 		}
 	}
 
-	deps := make(map[string]*chainhash.Hash, len(tx.Inputs))
+	// deps := make(map[string]*chainhash.Hash, len(tx.Inputs))
 	if len(summary) > 0 {
 		for vin, txin := range tx.Inputs {
-			sourceTx := beef.FindTransaction(txin.SourceTXID.String())
-			if sourceTx == nil {
-				return admit, engine.ErrMissingInput
-			}
-			deps[txin.SourceTXID.String()] = txin.SourceTXID
 			if slices.Contains(previousCoins, uint32(vin)) {
-				if b := bsv21.Decode(sourceTx.Outputs[txin.SourceTxOutIndex].LockingScript); b != nil {
+				outpoint := &overlay.Outpoint{
+					Txid:        *txin.SourceTXID,
+					OutputIndex: txin.SourceTxOutIndex,
+				}
+				var script *script.Script
+				if sourceTx := beef.FindTransaction(txin.SourceTXID.String()); sourceTx != nil {
+					script = sourceTx.Outputs[txin.SourceTxOutIndex].LockingScript
+				} else if output, err := tm.storage.FindOutput(ctx, outpoint, &tm.topic, nil, false); err != nil {
+					return admit, errors.New("missing input")
+				} else {
+					script = output.Script
+				}
+
+				if b := bsv21.Decode(script); b != nil {
 					if b.Op == string(bsv21.OpMint) {
-						outpoint := &overlay.Outpoint{
-							Txid:        *txin.SourceTXID,
-							OutputIndex: txin.SourceTxOutIndex,
-						}
 						b.Id = outpoint.OrdinalString()
 					}
 					if !tm.HasTokenId(b.Id) {
@@ -120,9 +124,9 @@ func (tm *Bsv21TopicManager) IdentifyAdmissableOutputs(ctx context.Context, beef
 				admit.OutputsToAdmit = append(admit.OutputsToAdmit, token.vouts...)
 			}
 		}
-		for _, depId := range deps {
-			admit.TxidsToInclude = append(admit.TxidsToInclude, depId)
-		}
+		// for _, depId := range deps {
+		// 	admit.AncillaryTxids = append(admit.AncillaryTxids, depId)
+		// }
 	}
 
 	return
@@ -151,28 +155,21 @@ func (tm *Bsv21TopicManager) IdentifyNeededInputs(ctx context.Context, beefBytes
 	}
 	var inputs []*overlay.Outpoint
 	for _, txin := range tx.Inputs {
-		var lockingScript *script.Script
-		if inTx := beef.FindTransaction(txin.SourceTXID.String()); inTx == nil {
-			return nil, engine.ErrMissingInput
-		} else {
-			lockingScript = inTx.Outputs[txin.SourceTxOutIndex].LockingScript
-		}
-
-		if b := bsv21.Decode(lockingScript); b != nil {
-			if b.Op == string(bsv21.OpMint) {
-				b.Id = (&overlay.Outpoint{
-					Txid:        *txin.SourceTXID,
-					OutputIndex: txin.SourceTxOutIndex,
-				}).OrdinalString()
-			}
-			if !tm.HasTokenId(b.Id) {
-				continue
-			}
-			inputs = append(inputs, &overlay.Outpoint{
+		if inTx := beef.FindTransaction(txin.SourceTXID.String()); inTx != nil {
+			outpoint := &overlay.Outpoint{
 				Txid:        *txin.SourceTXID,
 				OutputIndex: txin.SourceTxOutIndex,
-			})
-
+			}
+			script := inTx.Outputs[txin.SourceTxOutIndex].LockingScript
+			if b := bsv21.Decode(script); b != nil {
+				if b.Op == string(bsv21.OpMint) {
+					b.Id = (outpoint).OrdinalString()
+				}
+				if !tm.HasTokenId(b.Id) {
+					continue
+				}
+				inputs = append(inputs, outpoint)
+			}
 		}
 	}
 	return inputs, nil

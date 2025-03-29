@@ -10,8 +10,12 @@ import (
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
+	"github.com/bitcoin-sv/go-templates/template/cosign"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
+	"github.com/bsv-blockchain/go-sdk/script"
+	"github.com/bsv-blockchain/go-sdk/transaction"
+	"github.com/bsv-blockchain/go-sdk/transaction/template/p2pkh"
 )
 
 type Question struct {
@@ -26,11 +30,12 @@ type Question struct {
 }
 
 type Bsv21Lookup struct {
-	db          *sql.DB
-	insEvent    *sql.Stmt
-	updSpent    *sql.Stmt
-	delOutpoint *sql.Stmt
-	storage     engine.Storage
+	db             *sql.DB
+	insEvent       *sql.Stmt
+	updSpent       *sql.Stmt
+	delOutpoint    *sql.Stmt
+	updBlockHeight *sql.Stmt
+	storage        engine.Storage
 }
 
 func NewBsv21Lookup(storage engine.Storage, dbPath string) *Bsv21Lookup {
@@ -70,6 +75,10 @@ func NewBsv21Lookup(storage engine.Storage, dbPath string) *Bsv21Lookup {
 		log.Panic(err)
 	} else if l.delOutpoint, err = l.db.Prepare(`DELETE FROM events WHERE outpoint = ?`); err != nil {
 		log.Panic(err)
+	} else if l.updBlockHeight, err = l.db.Prepare(`UPDATE events 
+			SET height=?2, idx=?3
+			WHERE outpoint=?1`); err != nil {
+		log.Panic(err)
 	}
 	l.db.SetMaxOpenConns(1)
 	return l
@@ -87,15 +96,26 @@ func (l *Bsv21Lookup) saveEvent(event string, output *engine.Output) error {
 
 func (l *Bsv21Lookup) OutputAdded(ctx context.Context, output *engine.Output) error {
 	if b := bsv21.Decode(output.Script); b != nil {
-		var idEvt string
 		if b.Op == string(bsv21.OpMint) {
-			idEvt = fmt.Sprintf("id:%s", output.Outpoint.String())
-		} else {
-			idEvt = fmt.Sprintf("id:%s", b.Id)
+			b.Id = output.Outpoint.OrdinalString()
 		}
-		if err := l.saveEvent(idEvt, output); err != nil {
+		if err := l.saveEvent(fmt.Sprintf("id:%s", b.Id), output); err != nil {
 			return err
 		}
+		suffix := script.NewFromBytes(b.Insc.ScriptSuffix)
+		c := cosign.Decode(suffix)
+		if c != nil {
+			if err := l.saveEvent(fmt.Sprintf("cos:%s", c.Address), output); err != nil {
+				return err
+			} else if l.saveEvent(fmt.Sprintf("cos:%s", c.Cosigner), output); err != nil {
+				return err
+			}
+		} else if p := p2pkh.Decode(suffix, true); p != nil {
+			if err := l.saveEvent(fmt.Sprintf("p2pkh:%s", p.AddressString), output); err != nil {
+				return err
+			}
+		}
+
 		// TODO: any other events?
 	}
 	return nil
@@ -115,10 +135,17 @@ func (l *Bsv21Lookup) OutputDeleted(ctx context.Context, outpoint *overlay.Outpo
 	return nil
 }
 
+func (l *Bsv21Lookup) OutputBlockHeightUpdated(ctx context.Context, outpoint *overlay.Outpoint, blockHeight uint32, blockIdx uint64) error {
+	if _, err := l.updBlockHeight.Exec(outpoint.String(), blockHeight, blockIdx); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (l *Bsv21Lookup) Lookup(ctx context.Context, q *lookup.LookupQuestion) (*lookup.LookupAnswer, error) {
 	var sql strings.Builder
 	question := &Question{}
-	if err := json.Unmarshal(q.Query.([]byte), question); err != nil {
+	if err := json.Unmarshal(q.Query, question); err != nil {
 		return nil, err
 	}
 	args := []interface{}{question.Event, question.From.Height, question.From.Idx}
@@ -133,8 +160,10 @@ func (l *Bsv21Lookup) Lookup(ctx context.Context, q *lookup.LookupQuestion) (*lo
 	} else {
 		sql.WriteString(" ORDER BY event, height, idx")
 	}
-	sql.WriteString(" LIMIT ?")
-	args = append(args, question.Limit)
+	if question.Limit > 0 {
+		sql.WriteString(" LIMIT ?")
+		args = append(args, question.Limit)
+	}
 	if rows, err := l.db.Query(sql.String(), args...); err != nil {
 		return nil, err
 	} else {
@@ -147,17 +176,31 @@ func (l *Bsv21Lookup) Lookup(ctx context.Context, q *lookup.LookupQuestion) (*lo
 			if err := rows.Scan(&op); err != nil {
 				return nil, err
 			}
-			if outpoint, err := overlay.NewOutpointFromString(op); err == nil {
+			if outpoint, err := overlay.NewOutpointFromString(op); err != nil {
+				return nil, err
+			} else if outpoint != nil {
 				if output, err := l.storage.FindOutput(ctx, outpoint, nil, nil, true); err != nil {
 					return nil, err
-				} else if output != nil && len(output.Beef) > 0 {
-					answer.Outputs = append(answer.Outputs, &lookup.OutputListItem{
-						OutputIndex: output.Outpoint.OutputIndex,
-						Beef:        output.Beef,
-					})
+				} else if output != nil {
+					if beef, _, _, err := transaction.ParseBeef(output.Beef); err != nil {
+						return nil, err
+					} else {
+						if output.AncillaryBeef != nil {
+							if err = beef.MergeBeefBytes(output.AncillaryBeef); err != nil {
+								return nil, err
+							}
+						}
+						if beefBytes, err := beef.AtomicBytes(&outpoint.Txid); err != nil {
+							return nil, err
+						} else {
+							answer.Outputs = append(answer.Outputs, &lookup.OutputListItem{
+								OutputIndex: output.Outpoint.OutputIndex,
+								Beef:        beefBytes,
+							})
+						}
+					}
 				}
 			}
-			return nil, err
 		}
 		return answer, nil
 	}

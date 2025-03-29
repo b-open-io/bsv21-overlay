@@ -20,7 +20,8 @@
             "program": "cmd/server/server.go",
             "cwd": "${workspaceFolder}",
             "env": {
-                "TOPIC_DB": "data/fresh.db",
+                "TOPIC_DB": "data/fresh-topic.db",
+                "LOOKUP_DB": "data/fresh-lookup.db",
                 "BLOCK_HEADERS_URL": "http://rack:8082"
             },
             "args": [

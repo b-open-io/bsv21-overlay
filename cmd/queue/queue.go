@@ -91,7 +91,7 @@ func main() {
 				Topics: []string{"bsv21"},
 			}
 			log.Println("Processing", txid)
-			if taggedBeef.Beef, err = tx.AtomicBEEF(false); err != nil {
+			if taggedBeef.Beef, err = tx.BEEF(); err != nil {
 				panic(err)
 			} else if _, _, _, err := transaction.ParseBeef(taggedBeef.Beef); err != nil {
 				log.Panicf("Error parsing beef %s: %x", txid, taggedBeef.Beef)

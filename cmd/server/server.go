@@ -9,11 +9,12 @@ import (
 	"strconv"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
+	"github.com/4chain-ag/go-overlay-services/pkg/core/engine/storage"
 	"github.com/4chain-ag/go-overlay-services/pkg/core/gasp/core"
 	"github.com/b-open-io/bsv21-overlay/lookups"
-	sqlite "github.com/b-open-io/bsv21-overlay/storage"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/bsv-blockchain/go-sdk/overlay"
+	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -46,7 +47,7 @@ func main() {
 	log.Println("TOPIC_DB", os.Getenv("TOPIC_DB"))
 	log.Println("LOOKUP_DB", os.Getenv("LOOKUP_DB"))
 	log.Println("CACHE_DIR", os.Getenv("CACHE_DIR"))
-	storage, err := sqlite.NewSQLiteStorage(os.Getenv("TOPIC_DB"))
+	storage, err := storage.NewSQLiteStorage(os.Getenv("TOPIC_DB"))
 	if err != nil {
 		panic(err)
 	}
@@ -120,6 +121,21 @@ func main() {
 			})
 		} else {
 			return c.JSON(response)
+		}
+	})
+
+	app.Post("/lookup", func(c *fiber.Ctx) error {
+		var question lookup.LookupQuestion
+		if err := c.BodyParser(&question); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid request",
+			})
+		} else if answer, err := e.Lookup(c.Context(), &question); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		} else {
+			return c.JSON(answer)
 		}
 	})
 
