@@ -1,4 +1,4 @@
-package lookups
+package sqlite
 
 import (
 	"context"
@@ -8,27 +8,17 @@ import (
 	"strings"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
+	"github.com/b-open-io/bsv21-overlay/lookups/events"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 )
 
-type Question struct {
-	Event string `json:"event"`
-	From  struct {
-		Height uint32 `json:"height"`
-		Idx    uint64 `json:"idx"`
-	} `json:"from"`
-	Limit   int   `json:"limit"`
-	Spent   *bool `json:"spent"`
-	Reverse bool  `json:"rev"`
-}
-
 type EventLookup struct {
 	wdb            *sql.DB
 	rdb            *sql.DB
 	insEvent       *sql.Stmt
-	updSpent       *sql.Stmt
+	updSpend       *sql.Stmt
 	delOutpoint    *sql.Stmt
 	updBlockHeight *sql.Stmt
 	storage        engine.Storage
@@ -67,7 +57,7 @@ func NewEventLookup(storage engine.Storage, dbPath string) *EventLookup {
 		ON CONFLICT DO UPDATE  SET height = ?3, idx = ?4`,
 	); err != nil {
 		log.Panic(err)
-	} else if l.updSpent, err = l.wdb.Prepare(`UPDATE events SET spent = TRUE WHERE outpoint = ?`); err != nil {
+	} else if l.updSpend, err = l.wdb.Prepare(`UPDATE events SET spent = TRUE WHERE outpoint = ?`); err != nil {
 		log.Panic(err)
 	} else if l.delOutpoint, err = l.wdb.Prepare(`DELETE FROM events WHERE outpoint = ?`); err != nil {
 		log.Panic(err)
@@ -94,16 +84,28 @@ func NewEventLookup(storage engine.Storage, dbPath string) *EventLookup {
 	return l
 }
 
-func (l *EventLookup) SaveEvent(event string, output *engine.Output) error {
+func (l *EventLookup) SaveEvent(outpoint *overlay.Outpoint, event string, height uint32, idx uint64) error {
 	_, err := l.insEvent.Exec(
 		event,
-		output.Outpoint.String(),
-		output.BlockHeight,
-		output.BlockIdx,
+		outpoint.String(),
+		height,
+		idx,
 	)
 	return err
 }
-
+func (l *EventLookup) SaveEvents(outpoint *overlay.Outpoint, events []string, height uint32, idx uint64) error {
+	for _, event := range events {
+		if _, err := l.insEvent.Exec(
+			event,
+			outpoint.String(),
+			height,
+			idx,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 func (l *EventLookup) Close() {
 	if l.wdb != nil {
 		l.wdb.Close()
@@ -111,8 +113,8 @@ func (l *EventLookup) Close() {
 	if l.insEvent != nil {
 		l.insEvent.Close()
 	}
-	if l.updSpent != nil {
-		l.updSpent.Close()
+	if l.updSpend != nil {
+		l.updSpend.Close()
 	}
 	if l.delOutpoint != nil {
 		l.delOutpoint.Close()
@@ -124,7 +126,7 @@ func (l *EventLookup) Close() {
 
 func (l *EventLookup) Lookup(ctx context.Context, q *lookup.LookupQuestion) (*lookup.LookupAnswer, error) {
 	var sql strings.Builder
-	question := &Question{}
+	question := &events.Question{}
 	if err := json.Unmarshal(q.Query, question); err != nil {
 		return nil, err
 	}
@@ -188,10 +190,22 @@ func (l *EventLookup) Lookup(ctx context.Context, q *lookup.LookupQuestion) (*lo
 }
 
 func (l *EventLookup) OutputSpent(ctx context.Context, outpoint *overlay.Outpoint, _ string) error {
-	if _, err := l.updSpent.Exec(outpoint.String()); err != nil {
+	if _, err := l.updSpend.Exec(outpoint.String()); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (l *EventLookup) OutputsSpent(ctx context.Context, outpoints []*overlay.Outpoint, _ string) error {
+	args := []interface{}{}
+	for _, outpoint := range outpoints {
+		args = append(args, outpoint.String())
+	}
+	_, err := l.wdb.ExecContext(ctx,
+		`UPDATE events SET spent = TRUE WHERE outpoint IN (`+placeholders(len(outpoints))+`)`,
+		args...,
+	)
+	return err
 }
 
 func (l *EventLookup) OutputDeleted(ctx context.Context, outpoint *overlay.Outpoint, topic string) error {
@@ -206,4 +220,11 @@ func (l *EventLookup) OutputBlockHeightUpdated(ctx context.Context, outpoint *ov
 		return err
 	}
 	return nil
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return "?" + strings.Repeat(",?", n-1)
 }

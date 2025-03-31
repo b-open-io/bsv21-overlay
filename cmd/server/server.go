@@ -9,9 +9,10 @@ import (
 	"strconv"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
-	"github.com/4chain-ag/go-overlay-services/pkg/core/engine/storage"
 	"github.com/4chain-ag/go-overlay-services/pkg/core/gasp/core"
 	"github.com/b-open-io/bsv21-overlay/lookups"
+	lookupRedis "github.com/b-open-io/bsv21-overlay/lookups/events/redis"
+	storageRedis "github.com/b-open-io/bsv21-overlay/storage/redis"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
@@ -47,16 +48,36 @@ func main() {
 	log.Println("TOPIC_DB", os.Getenv("TOPIC_DB"))
 	log.Println("LOOKUP_DB", os.Getenv("LOOKUP_DB"))
 	log.Println("CACHE_DIR", os.Getenv("CACHE_DIR"))
-	storage, err := storage.NewSQLiteStorage(os.Getenv("TOPIC_DB"))
+	// storage, err := storage.NewSQLiteStorage(os.Getenv("TOPIC_DB"))
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// var rdb *redis.Client
+	// log.Println("Connecting to Redis", os.Getenv("REDIS"))
+	// if opts, err := redis.ParseURL(os.Getenv("REDIS")); err != nil {
+	// 	log.Fatalf("Failed to parse Redis URL: %v", err)
+	// } else {
+	// 	rdb = redis.NewClient(opts)
+	// }
+	// Initialize storage
+	storage, err := storageRedis.NewRedisStorage(os.Getenv("REDIS"))
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to initialize storage: %v", err)
 	}
-	bsv21Lookup := lookups.NewBsv21Lookup(storage, os.Getenv("LOOKUP_DB"))
+	defer storage.Close()
+
+	eventLookup, err := lookupRedis.NewRedisEventLookup(
+		os.Getenv("REDIS"),
+		storage,
+	)
+	bsv21Lookup := &lookups.Bsv21EventsLookup{
+		EventLookup: eventLookup,
+	}
 
 	e := engine.Engine{
 		Managers: map[string]engine.TopicManager{
-			"bsv21": topics.NewBsv21TopicManager(
-				"bsv21",
+			"tm_ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0": topics.NewBsv21ValidatedTopicManager(
+				"tm_ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0",
 				storage,
 				[]string{
 					"ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0", //MNEE

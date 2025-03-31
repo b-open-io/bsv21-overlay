@@ -12,11 +12,13 @@ import (
 	"github.com/GorillaPool/go-junglebus/models"
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/redis/go-redis/v9"
 )
 
 var JUNGLEBUS = "https://texas1.junglebus.gorillapool.io"
 var QueueDb *sql.DB
 var jb *junglebus.Client
+var rdb *redis.Client
 
 func init() {
 	var err error
@@ -24,25 +26,10 @@ func init() {
 		log.Panic(err)
 	}
 
-	if QueueDb, err = sql.Open("sqlite3", os.Getenv("QUEUE_DB")); err != nil {
-		panic(err)
-	} else if _, err = QueueDb.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-		panic(err)
-	} else if _, err = QueueDb.Exec("PRAGMA synchronous=NORMAL;"); err != nil {
-		panic(err)
-	} else if _, err = QueueDb.Exec("PRAGMA busy_timeout=5000;"); err != nil {
-		panic(err)
-	} else if _, err = QueueDb.Exec("PRAGMA temp_store=MEMORY;"); err != nil {
-		panic(err)
-	} else if _, err = QueueDb.Exec("PRAGMA mmap_size=30000000000;"); err != nil {
-		panic(err)
-	} else if _, err = QueueDb.Exec(`CREATE TABLE IF NOT EXISTS queue(
-		height INTEGER,
-		idx BIGINT,
-		txid TEXT, 
-		PRIMARY KEY(height, idx)
-	)`); err != nil {
-		panic(err)
+	if opts, err := redis.ParseURL(os.Getenv("REDIS")); err != nil {
+		log.Fatalf("Failed to parse Redis URL: %v", err)
+	} else {
+		rdb = redis.NewClient(opts)
 	}
 	jb, err = junglebus.New(
 		junglebus.WithHTTP(JUNGLEBUS),
@@ -51,42 +38,30 @@ func init() {
 
 func Exec() {
 	ctx := context.Background()
-	insQueue, err := QueueDb.Prepare(`INSERT INTO queue(height, idx, txid) VALUES(?, ?, ?) ON CONFLICT DO NOTHING`)
-	if err != nil {
-		log.Panic(err)
-	}
-	if _, err = insQueue.Exec(883989, 368, "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127"); err != nil {
-		log.Panic(err)
-	}
 	var sub *junglebus.Subscription
 	txcount := 0
-	// lastActivity := time.Now()
-	fromBlock := uint64(883989)
+	var err error
+	fromBlock := uint64(811302)
 	fromPage := uint64(0)
-	if err = QueueDb.QueryRow(`SELECT height FROM queue ORDER BY height DESC LIMIT 1`).Scan(&fromBlock); err != nil && err != sql.ErrNoRows {
-		log.Panic(err)
+	topicId := "22826aa9edbd03832bd1024866dab85d6abeade94eb011e5a3c3a59f5abdbe26"
+	if progress, err := rdb.HGet(ctx, "progress", topicId).Int(); err == nil {
+		fromBlock = uint64(progress)
+		log.Println("Resuming from block", fromBlock)
 	}
-
-	// go func() {
-	// 	ticker := time.NewTicker(1 * time.Minute)
-	// 	for range ticker.C {
-	// 		if time.Since(lastActivity) > 15*time.Minute {
-	// 			log.Println("No activity for 15 minutes, exiting...")
-	// 			os.Exit(0)
-	// 		}
-	// 	}
-	// }()
 
 	log.Println("Subscribing to Junglebus from block", fromBlock, fromPage)
 	if sub, err = jb.SubscribeWithQueue(ctx,
-		"e7ad693f63a56834ce62e6d52d67809ea5315c5fd66cbcca3cbad9b7dcda0836",
+		topicId,
 		fromBlock,
 		fromPage,
 		junglebus.EventHandler{
 			OnTransaction: func(txn *models.TransactionResponse) {
 				txcount++
 				log.Printf("[TX]: %d - %d: %d %s\n", txn.BlockHeight, txn.BlockIndex, len(txn.Transaction), txn.Id)
-				if _, err := insQueue.Exec(txn.BlockHeight, txn.BlockIndex, txn.Id); err != nil {
+				if err := rdb.ZAdd(ctx, "bsv21", redis.Z{
+					Member: txn.Id,
+					Score:  float64(txn.BlockHeight)*1e9 + float64(txn.BlockIndex),
+				}).Err(); err != nil {
 					log.Panic(err)
 				}
 			},
@@ -94,6 +69,9 @@ func Exec() {
 				log.Printf("[STATUS]: %d %v %d processed\n", status.StatusCode, status.Message, txcount)
 				switch status.StatusCode {
 				case 200:
+					if err := rdb.HSet(ctx, "progress", topicId, status.Block+1).Err(); err != nil {
+						log.Panic(err)
+					}
 					txcount = 0
 				case 999:
 					log.Println(status.Message)

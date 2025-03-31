@@ -2,27 +2,21 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
-	"github.com/4chain-ag/go-overlay-services/pkg/core/engine/storage"
 	"github.com/GorillaPool/go-junglebus"
-	"github.com/b-open-io/bsv21-overlay/lookups"
-	"github.com/b-open-io/bsv21-overlay/sub"
-	"github.com/b-open-io/bsv21-overlay/topics"
+	"github.com/b-open-io/bsv21-overlay/util"
+	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/overlay"
-	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/redis/go-redis/v9"
 )
 
 var JUNGLEBUS = "https://texas1.junglebus.gorillapool.io"
@@ -42,122 +36,97 @@ func init() {
 	}
 }
 
-func main() {
-	ctx := context.Background()
-	storage, err := storage.NewSQLiteStorage(os.Getenv("TOPIC_DB"))
-	if err != nil {
-		panic(err)
-	}
-	bsv21Lookup := lookups.NewBsv21Lookup(storage, os.Getenv("LOOKUP_DB"))
-
-	e := engine.Engine{
-		Managers: map[string]engine.TopicManager{
-			"bsv21": topics.NewBsv21TopicManager(
-				"bsv21",
-				storage,
-				[]string{
-					"ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0", //MNEE
-				}),
-		},
-		LookupServices: map[string]engine.LookupService{
-			"bsv21": bsv21Lookup,
-		},
-		Storage:      storage,
-		ChainTracker: chaintracker,
-		Verbose:      true,
-		PanicOnError: true,
-	}
-
-	rows, err := sub.QueueDb.Query(`SELECT txid FROM queue ORDER BY height, idx`)
-	for rows.Next() {
-		start := time.Now()
-		var txidStr string
-		if err := rows.Scan(&txidStr); err != nil {
-			panic(err)
-		}
-		if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
-			panic(err)
-		} else if tx, err := loadTx(ctx, txid); err != nil {
-			panic(err)
-		} else {
-			merklePath := tx.MerklePath
-			tx.MerklePath = nil
-			for _, input := range tx.Inputs {
-				if input.SourceTransaction, err = loadTx(ctx, input.SourceTXID); err != nil {
-					panic(err)
-				}
-			}
-			taggedBeef := overlay.TaggedBEEF{
-				Topics: []string{"bsv21"},
-			}
-			log.Println("Processing", txid)
-			if taggedBeef.Beef, err = tx.BEEF(); err != nil {
-				panic(err)
-			} else if _, _, _, err := transaction.ParseBeef(taggedBeef.Beef); err != nil {
-				log.Panicf("Error parsing beef %s: %x", txid, taggedBeef.Beef)
-			} else if steak, err := e.Submit(ctx, taggedBeef, engine.SubmitModeHistorical, nil); err != nil {
-				panic(err)
-			} else if s, err := json.Marshal(steak); err != nil {
-				panic(err)
-			} else {
-				if merklePath != nil {
-					if err := e.HandleNewMerkleProof(ctx, tx.TxID(), merklePath); err != nil {
-						panic(err)
-					}
-					log.Println("Merkle proof for", txid, "updated")
-				}
-				if _, err := sub.QueueDb.Exec(`DELETE FROM queue WHERE txid = ?`, txid.String()); err != nil {
-					panic(err)
-				}
-				log.Println("Processed", txid, "in", time.Since(start), "as", string(s))
-				start = time.Now()
-			}
-		}
-	}
-	sub.QueueDb.Close()
-	storage.Close()
-	bsv21Lookup.Close()
+type progress struct {
+	txid string
+	time time.Duration
 }
 
-func loadTx(ctx context.Context, txid *chainhash.Hash) (*transaction.Transaction, error) {
-	start := time.Now()
-	txidStr := txid.String()
-	if beefBytes, err := os.ReadFile(fmt.Sprintf("%s/%s.beef", CACHE_DIR, txid)); err == nil {
-		if tx, err := transaction.NewTransactionFromBEEF(beefBytes); err != nil {
-			log.Println("Error loading beef", err)
-		} else if tx == nil {
-			log.Println("Missing tx", txid)
-		} else {
-			return tx, nil
-		}
-	}
-	if t, err := jb.GetTransaction(ctx, txidStr); err != nil {
-		panic(err)
-	} else if tx, err := transaction.NewTransactionFromBytes(t.Transaction); err != nil {
-		panic(err)
-	} else if resp, err := http.Get(fmt.Sprintf("%s/v1/transaction/proof/%s/bin", JUNGLEBUS, txid)); err != nil {
-		panic(err)
-	} else if resp.StatusCode < 300 {
-		prf, _ := io.ReadAll(resp.Body)
-		if merklePath, err := transaction.NewMerklePathFromBinary(prf); err != nil {
-			panic(err)
-		} else if root, err := merklePath.ComputeRoot(tx.TxID()); err != nil {
-			panic(err)
-		} else if valid, err := chaintracker.IsValidRootForHeight(root, merklePath.BlockHeight); err != nil {
-			panic(err)
-		} else if !valid {
-			panic("invalid-merkle-path")
-		} else {
-			tx.MerklePath = merklePath
-		}
-		if beefBytes, err := tx.AtomicBEEF(false); err != nil {
-			panic(err)
-		} else if err := os.WriteFile(fmt.Sprintf("%s/%s.beef", CACHE_DIR, txid), beefBytes, 0644); err != nil {
-			panic(err)
-		}
-		log.Println(txid, " loaded in ", time.Since(start))
-		return tx, nil
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle OS signals for graceful shutdown
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-signalChan
+		log.Println("Received shutdown signal, cleaning up...")
+		cancel()
+	}()
+
+	var rdb *redis.Client
+	log.Println("Connecting to Redis", os.Getenv("REDIS"))
+	if opts, err := redis.ParseURL(os.Getenv("REDIS")); err != nil {
+		log.Fatalf("Failed to parse Redis URL: %v", err)
 	} else {
-		return nil, errors.New("missing-tx" + txidStr)
+		rdb = redis.NewClient(opts)
 	}
+
+	for {
+		start := time.Now()
+		query := redis.ZRangeArgs{
+			Stop:    "+inf",
+			Start:   "-inf",
+			Key:     "bsv21",
+			ByScore: true,
+			Count:   1000,
+		}
+		if txids, err := rdb.ZRangeArgs(ctx, query).Result(); err != nil {
+			log.Fatalf("Failed to query Redis: %v", err)
+		} else if len(txids) == 0 {
+			time.Sleep(1 * time.Second)
+		} else {
+			log.Println("Processing", len(txids), "txids")
+			for _, txidStr := range txids {
+				if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
+					log.Fatalf("Failed to parse txid: %v", err)
+				} else if tx, err := util.LoadTx(ctx, txid); err != nil {
+					log.Fatalf("Failed to load tx: %v", err)
+				} else {
+					tokenIds := make(map[string]struct{})
+					for vout, output := range tx.Outputs {
+						b := bsv21.Decode(output.LockingScript)
+						if b != nil {
+							if b.Op == string(bsv21.OpMint) {
+								b.Id = (&overlay.Outpoint{
+									Txid:        *txid,
+									OutputIndex: uint32(vout),
+								}).OrdinalString()
+							}
+							tokenIds[b.Id] = struct{}{}
+						}
+					}
+					if len(tokenIds) > 0 {
+						var score float64
+						if tx.MerklePath != nil {
+							score = float64(tx.MerklePath.BlockHeight) * 1e9
+							for _, leaf := range tx.MerklePath.Path[0] {
+								if leaf.Hash != nil && leaf.Hash.Equal(*txid) {
+									score += float64(leaf.Offset)
+									break
+								}
+							}
+
+						}
+						for tokenId := range tokenIds {
+							if _, err := rdb.ZAdd(ctx, "tok:"+tokenId, redis.Z{
+								Score:  score,
+								Member: txidStr,
+							}).Result(); err != nil {
+								log.Fatalf("Failed to set token in Redis: %v", err)
+							}
+						}
+					}
+					if err := rdb.ZRem(ctx, "bsv21", txidStr).Err(); err != nil {
+						log.Fatalf("Failed to remove from Redis: %v", err)
+					}
+				}
+			}
+			duration := time.Since(start)
+			log.Printf("Processed %d txids in %s, %vtx/s\n", len(txids), duration, float64(len(txids))/duration.Seconds())
+
+		}
+	}
+
+	// Close the database connection
 }
