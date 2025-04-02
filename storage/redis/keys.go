@@ -19,3 +19,5 @@ func outMembershipKey(topic string) string {
 func txMembershipKey(topic string) string {
 	return "tm:" + topic
 }
+
+var topicKey = "topics"

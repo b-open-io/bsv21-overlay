@@ -23,8 +23,8 @@
                 "BLOCK_HEADERS_URL": "http://localhost:8080",
                 "REDIS": "redis://localhost:6666",
                 "JUNGLEBUS":"https://texas1.junglebus.gorillapool.io",
-                // "PEERS":"https://bsv21.overlay.gorillapool.io,http://shack:8081",
-                "HOSTING_URL": "https://bsv21.overlay.gorillapool.io"
+                "PEERS":"https://bsv21.overlay.gorillapool.io,http://shack:8081",
+                "HOSTING_URL": "http://rack:8081"
             },
             "args": [
                 "-p=8081",
@@ -42,7 +42,7 @@
                 "BLOCK_HEADERS_URL": "http://localhost:8080",
                 "REDIS": "redis://localhost:6666",
                 "JUNGLEBUS":"https://texas1.junglebus.gorillapool.io",
-                "HOSTING_URL": "https://bsv21.overlay.gorillapool.io"
+                "HOSTING_URL": "http://rack:8081"
             },
             "args": [
                 "-p=8081"

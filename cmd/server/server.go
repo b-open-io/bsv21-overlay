@@ -36,11 +36,10 @@ var JUNGLEBUS = "https://texas1.junglebus.gorillapool.io"
 var chaintracker headers_client.Client
 var PORT int
 var SYNC bool
-var redisOpts *redis.Options
 var rdb, sub *redis.Client
-var sharedPubSub *redis.PubSub
 var topicClients = make(map[string][]*bufio.Writer) // Map of topic to connected clients
 var topicClientsMutex = &sync.Mutex{}               // Mutex to protect topicClients
+var peers = []string{}
 
 func init() {
 	godotenv.Load("../../.env")
@@ -60,6 +59,10 @@ func init() {
 	} else {
 		rdb = redis.NewClient(redisOpts)
 		sub = redis.NewClient(redisOpts)
+	}
+	PEERS := os.Getenv("PEERS")
+	if PEERS != "" {
+		peers = strings.Split(PEERS, ",")
 	}
 }
 
@@ -95,11 +98,7 @@ func broadcastMessages(ctx context.Context) {
 
 func main() {
 	ctx := context.Background()
-	hostingUrl := fmt.Sprintf("http://morovol:%d", PORT)
-	peers := []string{
-		"http://morovol:3000",
-		"http://morovol:3001",
-	}
+	hostingUrl := os.Getenv("HOSTING_URL")
 
 	storage, err := storageRedis.NewRedisStorage(os.Getenv("REDIS"))
 	if err != nil {
@@ -111,6 +110,9 @@ func main() {
 		os.Getenv("REDIS"),
 		storage,
 	)
+	if err != nil {
+		log.Fatalf("Failed to initialize event lookup: %v", err)
+	}
 	bsv21Lookup := &lookups.Bsv21EventsLookup{
 		EventLookup: eventLookup,
 	}
@@ -129,19 +131,21 @@ func main() {
 		ChainTracker: chaintracker,
 		PanicOnError: true,
 	}
-	iter := rdb.Scan(ctx, 0, "tm:*", 10000).Iterator()
-	for iter.Next(ctx) {
-		key := iter.Val()
-		topic := key[3:]
-		tokenId := key[6:]
-		e.Managers[topic] = topics.NewBsv21ValidatedTopicManager(
-			topic,
-			storage,
-			[]string{tokenId},
-		)
-		e.SyncConfiguration[topic] = engine.SyncConfiguration{
-			Type:  engine.SyncConfigurationPeers,
-			Peers: peers,
+	if tms, err := rdb.SMembers(ctx, "topics").Result(); err != nil {
+		log.Fatalf("Failed to get topics from Redis: %v", err)
+	} else {
+		for _, top := range tms {
+			log.Println("Adding topic manager:", top)
+			tokenId := top[3:]
+			e.Managers[top] = topics.NewBsv21ValidatedTopicManager(
+				top,
+				storage,
+				[]string{tokenId},
+			)
+			e.SyncConfiguration[top] = engine.SyncConfiguration{
+				Type:  engine.SyncConfigurationPeers,
+				Peers: peers,
+			}
 		}
 	}
 
