@@ -85,7 +85,7 @@ func main() {
 	limiter := make(chan struct{}, 16)
 	done := make(chan *tokenSummary, 1000)
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(time.Minute)
 		txcount := 0
 		outcount := 0
 		// accTime
@@ -116,14 +116,6 @@ func main() {
 		for iter.Next(ctx) {
 			hasRows = true
 			key := iter.Val()
-
-			// }
-			// break
-			// keys, err := rdb.Keys(ctx, "tok:*").Result()
-			// if err != nil {
-			// 	log.Fatalf("Failed to scan Redis: %v", err)
-			// }
-			// for _, key := range keys {
 			select {
 			case <-ctx.Done():
 				log.Println("Context canceled, stopping processing...")
