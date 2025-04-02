@@ -21,7 +21,6 @@ import (
 )
 
 var JUNGLEBUS string
-var CACHE_DIR string
 var jb *junglebus.Client
 var chaintracker headers_client.Client
 
@@ -31,7 +30,6 @@ func init() {
 	jb, _ = junglebus.New(
 		junglebus.WithHTTP(JUNGLEBUS),
 	)
-	CACHE_DIR = os.Getenv("CACHE_DIR")
 	chaintracker = headers_client.Client{
 		Url:    os.Getenv("BLOCK_HEADERS_URL"),
 		ApiKey: os.Getenv("BLOCK_HEADERS_API_KEY"),
@@ -89,11 +87,17 @@ func main() {
 						wg.Done()
 						<-limiter
 					}()
+					// log.Println("Processing txid", txidStr)
 					if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
 						log.Fatalf("Failed to parse txid: %v", err)
 					} else if tx, err := util.LoadTx(ctx, txid); err != nil {
 						log.Fatalf("Failed to load tx: %v", err)
 					} else {
+						for _, input := range tx.Inputs {
+							if input.SourceTransaction, err = util.LoadTx(ctx, input.SourceTXID); err != nil {
+								log.Fatalf("Failed to load input tx: %v", err)
+							}
+						}
 						tokenIds := make(map[string]struct{})
 						for vout, output := range tx.Outputs {
 							b := bsv21.Decode(output.LockingScript)

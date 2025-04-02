@@ -21,10 +21,7 @@ var jb *junglebus.Client
 var rdb *redis.Client
 
 func init() {
-	var err error
-	if err = godotenv.Load("../../.env"); err != nil {
-		log.Panic(err)
-	}
+	godotenv.Load("../../.env")
 
 	if opts, err := redis.ParseURL(os.Getenv("REDIS")); err != nil {
 		log.Fatalf("Failed to parse Redis URL: %v", err)
@@ -32,9 +29,12 @@ func init() {
 		rdb = redis.NewClient(opts)
 	}
 	JUNGLEBUS = os.Getenv("JUNGLEBUS")
-	jb, err = junglebus.New(
+	var err error
+	if jb, err = junglebus.New(
 		junglebus.WithHTTP(JUNGLEBUS),
-	)
+	); err != nil {
+		log.Fatalf("Failed to create Junglebus client: %v", err)
+	}
 }
 
 func Exec() {

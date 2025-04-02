@@ -27,14 +27,12 @@ import (
 )
 
 var JUNGLEBUS = "https://texas1.junglebus.gorillapool.io"
-var CACHE_DIR string
 var chaintracker headers_client.Client
 var PORT int
 var SYNC bool
 
 func init() {
 	godotenv.Load("../../.env")
-	CACHE_DIR = os.Getenv("CACHE_DIR")
 	chaintracker = headers_client.Client{
 		Url:    os.Getenv("BLOCK_HEADERS_URL"),
 		ApiKey: os.Getenv("BLOCK_HEADERS_API_KEY"),

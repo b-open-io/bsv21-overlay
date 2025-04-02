@@ -27,7 +27,6 @@ import (
 )
 
 var JUNGLEBUS = "https://texas1.junglebus.gorillapool.io"
-var CACHE_DIR string
 var jb *junglebus.Client
 var chaintracker headers_client.Client
 
@@ -42,7 +41,6 @@ func init() {
 	jb, _ = junglebus.New(
 		junglebus.WithHTTP(JUNGLEBUS),
 	)
-	CACHE_DIR = os.Getenv("CACHE_DIR")
 	chaintracker = headers_client.Client{
 		Url:    os.Getenv("BLOCK_HEADERS_URL"),
 		ApiKey: os.Getenv("BLOCK_HEADERS_API_KEY"),
@@ -84,7 +82,7 @@ func main() {
 		EventLookup: eventLookup,
 	}
 
-	limiter := make(chan struct{}, 24)
+	limiter := make(chan struct{}, 16)
 	done := make(chan *tokenSummary, 1000)
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -118,7 +116,7 @@ func main() {
 		for iter.Next(ctx) {
 			hasRows = true
 			key := iter.Val()
-			log.Println("Processing key:", key)
+
 			// }
 			// break
 			// keys, err := rdb.Keys(ctx, "tok:*").Result()
@@ -139,15 +137,17 @@ func main() {
 						<-limiter
 					}()
 					parts := strings.Split(key, ":")
+					tokenId := parts[1]
+					// log.Println("Processing key:", tokenId)
 
-					tm := "tm_" + parts[1]
+					tm := "tm_" + tokenId
 					e := engine.Engine{
 						Managers: map[string]engine.TopicManager{
 							tm: topics.NewBsv21ValidatedTopicManager(
 								tm,
 								storage,
 								[]string{
-									parts[1],
+									tokenId,
 								},
 							),
 						},
@@ -226,14 +226,14 @@ func main() {
 						}
 					}
 					duration := time.Since(logTime)
-					log.Printf("Processed %s tx %d in %v %vtx/s\n", parts[1], len(txids), duration, float64(len(txids))/duration.Seconds())
+					log.Printf("Processed %s tx %d in %v %vtx/s\n", tokenId, len(txids), duration, float64(len(txids))/duration.Seconds())
 				}(key)
 			}
 		}
-		if !hasRows {
-			break
-		}
 		wg.Wait()
+		if !hasRows {
+			time.Sleep(5 * time.Second)
+		}
 		// log.Println("Waiting for all goroutines to finish...")
 	}
 
