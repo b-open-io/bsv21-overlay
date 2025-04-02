@@ -20,7 +20,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var JUNGLEBUS = "https://texas1.junglebus.gorillapool.io"
+var JUNGLEBUS string
 var CACHE_DIR string
 var jb *junglebus.Client
 var chaintracker headers_client.Client
@@ -28,6 +28,7 @@ var rdb *redis.Client
 
 func init() {
 	godotenv.Load("../../.env")
+	JUNGLEBUS = os.Getenv("JUNGLEBUS")
 	jb, _ = junglebus.New(
 		junglebus.WithHTTP(JUNGLEBUS),
 	)
@@ -65,20 +66,6 @@ func LoadTx(ctx context.Context, txid *chainhash.Hash) (tx *transaction.Transact
 			return tx, nil
 		}
 	}
-	if tx == nil || tx.MerklePath == nil {
-		if beefBytes, err := os.ReadFile(fmt.Sprintf("%s/%s.beef", CACHE_DIR, txidStr)); err == nil {
-			if _, tx, txid, err = transaction.ParseBeef(beefBytes); err != nil {
-				log.Println("Error loading beef", err)
-			} else if tx == nil {
-				log.Println("Missing tx", txidStr)
-			} else if tx.MerklePath != nil {
-				if err = rdb.HSet(ctx, redisStorage.BeefKey, txidStr, beefBytes).Err(); err != nil {
-					panic(err)
-				}
-				return tx, nil
-			}
-		}
-	}
 	inflightM.Lock()
 	inflight, ok := inflightMap[txidStr]
 	if !ok {
@@ -101,33 +88,33 @@ func LoadTx(ctx context.Context, txid *chainhash.Hash) (tx *transaction.Transact
 			delete(inflightMap, txidStr)
 			inflightM.Unlock()
 		}()
-		if tx == nil {
-			log.Println("Loading tx from Junglebus", txidStr)
-			if t, err := jb.GetTransaction(ctx, txidStr); err != nil {
-				panic(err)
-			} else if tx, err = transaction.NewTransactionFromBytes(t.Transaction); err != nil {
-				panic(err)
-			}
-		}
+		// if tx == nil {
+		// 	log.Println("Loading tx from Junglebus", txidStr)
+		// 	if t, err := jb.GetTransaction(ctx, txidStr); err != nil {
+		// 		panic(err)
+		// 	} else if tx, err = transaction.NewTransactionFromBytes(t.Transaction); err != nil {
+		// 		panic(err)
+		// 	}
+		// }
 		log.Println("Loading proof from Junglebus", txidStr)
-		if resp, err := http.Get(fmt.Sprintf("%s/v1/transaction/proof/%s/bin", JUNGLEBUS, txid)); err != nil {
+		if resp, err := http.Get(fmt.Sprintf("%s/v5/tx/%s/beef", os.Getenv("1SAT"), txid)); err != nil {
 			panic(err)
 		} else if resp.StatusCode < 300 {
-			prf, _ := io.ReadAll(resp.Body)
-			if merklePath, err := transaction.NewMerklePathFromBinary(prf); err != nil {
+			beefBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
 				panic(err)
-			} else if root, err := merklePath.ComputeRoot(txid); err != nil {
+			} else if _, tx, txid, err = transaction.ParseBeef(beefBytes); err != nil {
 				panic(err)
-			} else if valid, err := chaintracker.IsValidRootForHeight(root, merklePath.BlockHeight); err != nil {
-				panic(err)
-			} else if !valid {
-				panic("invalid-merkle-path")
-			} else {
-				tx.MerklePath = merklePath
+			} else if tx.MerklePath != nil {
+				if root, err := tx.MerklePath.ComputeRoot(txid); err != nil {
+					panic(err)
+				} else if valid, err := chaintracker.IsValidRootForHeight(root, tx.MerklePath.BlockHeight); err != nil {
+					panic(err)
+				} else if !valid {
+					panic("invalid-merkle-path")
+				}
 			}
-			if beefBytes, err := tx.AtomicBEEF(false); err != nil {
-				panic(err)
-			} else if err = rdb.HSet(ctx, redisStorage.BeefKey, txidStr, beefBytes).Err(); err != nil {
+			if err = rdb.HSet(ctx, redisStorage.BeefKey, txidStr, beefBytes).Err(); err != nil {
 				panic(err)
 			}
 			log.Println(txid, " loaded in ", time.Since(start))

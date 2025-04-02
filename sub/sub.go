@@ -15,7 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var JUNGLEBUS = "https://texas1.junglebus.gorillapool.io"
+var JUNGLEBUS string
 var QueueDb *sql.DB
 var jb *junglebus.Client
 var rdb *redis.Client
@@ -31,6 +31,7 @@ func init() {
 	} else {
 		rdb = redis.NewClient(opts)
 	}
+	JUNGLEBUS = os.Getenv("JUNGLEBUS")
 	jb, err = junglebus.New(
 		junglebus.WithHTTP(JUNGLEBUS),
 	)

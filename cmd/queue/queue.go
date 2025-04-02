@@ -20,13 +20,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var JUNGLEBUS = "https://texas1.junglebus.gorillapool.io"
+var JUNGLEBUS string
 var CACHE_DIR string
 var jb *junglebus.Client
 var chaintracker headers_client.Client
 
 func init() {
 	godotenv.Load("../../.env")
+	JUNGLEBUS = os.Getenv("JUNGLEBUS")
 	jb, _ = junglebus.New(
 		junglebus.WithHTTP(JUNGLEBUS),
 	)
