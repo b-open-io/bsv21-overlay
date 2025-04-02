@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -8,6 +9,8 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/4chain-ag/go-overlay-services/pkg/core/gasp/core"
@@ -24,12 +27,18 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 )
 
 var JUNGLEBUS = "https://texas1.junglebus.gorillapool.io"
 var chaintracker headers_client.Client
 var PORT int
 var SYNC bool
+var redisOpts *redis.Options
+var rdb, sub *redis.Client
+var sharedPubSub *redis.PubSub
+var topicClients = make(map[string][]*bufio.Writer) // Map of topic to connected clients
+var topicClientsMutex = &sync.Mutex{}               // Mutex to protect topicClients
 
 func init() {
 	godotenv.Load("../../.env")
@@ -44,9 +53,46 @@ func init() {
 	if PORT == 0 {
 		PORT = 3000
 	}
+	if redisOpts, err := redis.ParseURL(os.Getenv("REDIS")); err != nil {
+		log.Fatalf("Failed to parse Redis URL: %v", err)
+	} else {
+		rdb = redis.NewClient(redisOpts)
+		sub = redis.NewClient(redisOpts)
+	}
+}
+
+func broadcastMessages(ctx context.Context) {
+	sharedPubSub := sub.PSubscribe(ctx, "*") // Subscribe to all topics
+	defer sharedPubSub.Close()
+
+	for {
+		msg, err := sharedPubSub.ReceiveMessage(ctx)
+		if err != nil {
+			log.Println("Error receiving message:", err)
+			continue
+		}
+
+		// Broadcast the message to all clients subscribed to the topic
+		topicClientsMutex.Lock()
+		if clients, exists := topicClients[msg.Channel]; exists {
+			for _, client := range clients {
+				parts := strings.Split(msg.Payload, ":")
+				if len(parts) != 2 {
+					log.Println("Invalid message format:", msg.Payload)
+					continue
+				}
+				_, _ = fmt.Fprintf(client, "event: %s\n", msg.Channel)
+				_, _ = fmt.Fprintf(client, "data: %s\n", parts[1])
+				_, _ = fmt.Fprintf(client, "id: %s\n\n", parts[0])
+				_ = client.Flush()
+			}
+		}
+		topicClientsMutex.Unlock()
+	}
 }
 
 func main() {
+	ctx := context.Background()
 	hostingUrl := fmt.Sprintf("http://morovol:%d", PORT)
 	peers := []string{
 		"http://morovol:3000",
@@ -66,31 +112,15 @@ func main() {
 	bsv21Lookup := &lookups.Bsv21EventsLookup{
 		EventLookup: eventLookup,
 	}
-
 	e := engine.Engine{
-		Managers: map[string]engine.TopicManager{
-			"tm_ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0": topics.NewBsv21ValidatedTopicManager(
-				"tm_ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0",
-				storage,
-				[]string{
-					"ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0", //MNEE
-				}),
-		},
+		Managers: map[string]engine.TopicManager{},
 		LookupServices: map[string]engine.LookupService{
 			"bsv21": bsv21Lookup,
 		},
-		SyncConfiguration: map[string]engine.SyncConfiguration{
-			"tm_ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0": {
-				Type:  engine.SyncConfigurationPeers,
-				Peers: peers,
-			},
-		},
+		SyncConfiguration: map[string]engine.SyncConfiguration{},
 		Broadcaster: &broadcaster.Arc{
-			ApiUrl: "https://arc.taal.com",
-			// ApiKey:  os.Getenv("ARC_API_KEY"),
+			ApiUrl:  "https://arc.taal.com",
 			WaitFor: broadcaster.ACCEPTED_BY_NETWORK,
-			// CallbackUrl:   hostingUrl + "/arc-ingest",
-			// CallbackToken: callbackToken,
 		},
 		HostingURL:   hostingUrl,
 		Storage:      storage,
@@ -98,11 +128,30 @@ func main() {
 		Verbose:      true,
 		PanicOnError: true,
 	}
+	iter := rdb.Scan(ctx, 0, "tm:*", 10000).Iterator()
+	for iter.Next(ctx) {
+		key := iter.Val()
+		topic := key[3:]
+		tokenId := key[6:]
+		e.Managers[topic] = topics.NewBsv21ValidatedTopicManager(
+			topic,
+			storage,
+			[]string{tokenId},
+		)
+		e.SyncConfiguration[topic] = engine.SyncConfiguration{
+			Type:  engine.SyncConfigurationPeers,
+			Peers: peers,
+		}
+	}
+
+	// Start broadcasting messages in a separate goroutine
+	go broadcastMessages(ctx)
+
 	// Create a new Fiber app
 	app := fiber.New()
 	app.Use(logger.New())
 
-	// Define a simple GET route
+	// Define routes
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("Hello, World!")
 	})
@@ -184,6 +233,52 @@ func main() {
 		}
 	})
 
+	app.Get("/subscribe/:topics", func(c *fiber.Ctx) error {
+		topicsParam := c.Params("topics")
+		if topicsParam == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Missing topics",
+			})
+		}
+		topics := strings.Split(topicsParam, ",")
+		if len(topics) == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "No topics provided",
+			})
+		}
+
+		// Set headers for SSE
+		c.Set("Content-Type", "text/event-stream")
+		c.Set("Cache-Control", "no-cache")
+		c.Set("Connection", "keep-alive")
+
+		// Add the client to the topicClients map
+		writer := bufio.NewWriter(c.Context().Response.BodyWriter())
+		for _, topic := range topics {
+			topicClientsMutex.Lock()
+			topicClients[topic] = append(topicClients[topic], writer)
+			topicClientsMutex.Unlock()
+		}
+
+		// Wait for the client to disconnect
+		<-c.Context().Done()
+
+		// Remove the client from the topicClients map
+		for _, topic := range topics {
+			topicClientsMutex.Lock()
+			clients := topicClients[topic]
+			for i, client := range clients {
+				if client == writer {
+					topicClients[topic] = append(clients[:i], clients[i+1:]...)
+					break
+				}
+			}
+			topicClientsMutex.Unlock()
+		}
+
+		return nil
+	})
+
 	app.Post("/arc-ingest", func(c *fiber.Ctx) error {
 		var status broadcaster.ArcResponse
 		if err := c.BodyParser(&status); err != nil {
@@ -215,7 +310,7 @@ func main() {
 		}
 	}
 
-	// Start the server on port 3000
+	// Start the server on the specified port
 	if err := app.Listen(fmt.Sprintf(":%d", PORT)); err != nil {
 		log.Fatalf("Error starting server: %v", err)
 	}

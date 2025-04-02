@@ -58,6 +58,7 @@ func (l *RedisEventLookup) SaveEvent(ctx context.Context, outpoint *overlay.Outp
 		} else if err := p.SAdd(ctx, outpointEventsKey(outpoint), event).Err(); err != nil {
 			return err
 		}
+		p.Publish(ctx, event, fmt.Sprintf("%f:%s", score, op))
 		return nil
 	})
 	return err
@@ -81,6 +82,7 @@ func (l *RedisEventLookup) SaveEvents(ctx context.Context, outpoint *overlay.Out
 			} else if err := p.SAdd(ctx, outpointEventsKey(outpoint), event).Err(); err != nil {
 				return err
 			}
+			p.Publish(ctx, event, op)
 		}
 		return nil
 	})
