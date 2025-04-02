@@ -10,7 +10,7 @@ func outputKey(outpoint *overlay.Outpoint) string {
 	return "o:" + outpoint.String()
 }
 
-var beefKey = "beef"
+var BeefKey = "beef"
 
 func outMembershipKey(topic string) string {
 	return "om:" + topic

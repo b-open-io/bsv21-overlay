@@ -31,7 +31,7 @@ func (s *RedisStorage) InsertOutput(ctx context.Context, utxo *engine.Output) (e
 			return err
 		} else if err := p.HMSet(ctx, outputKey(&utxo.Outpoint), outputToMap(utxo)).Err(); err != nil {
 			return err
-		} else if err = p.HSetNX(ctx, beefKey, utxo.Outpoint.Txid.String(), utxo.Beef).Err(); err != nil {
+		} else if err = p.HSet(ctx, BeefKey, utxo.Outpoint.Txid.String(), utxo.Beef).Err(); err != nil {
 			return err
 		} else if err = p.ZAdd(ctx, outMembershipKey(utxo.Topic), redis.Z{
 			Score:  float64(utxo.BlockHeight)*1e9 + float64(utxo.BlockIdx),
@@ -46,7 +46,9 @@ func (s *RedisStorage) InsertOutput(ctx context.Context, utxo *engine.Output) (e
 
 func (s *RedisStorage) FindOutput(ctx context.Context, outpoint *overlay.Outpoint, topic *string, spent *bool, includeBEEF bool) (o *engine.Output, err error) {
 
-	o = &engine.Output{}
+	o = &engine.Output{
+		Outpoint: *outpoint,
+	}
 	if topic != nil {
 		otKey := outputTopicKey(outpoint, *topic)
 		if spent != nil {
@@ -75,7 +77,7 @@ func (s *RedisStorage) FindOutput(ctx context.Context, outpoint *overlay.Outpoin
 		return nil, err
 	}
 	if includeBEEF {
-		if o.Beef, err = s.DB.HGet(ctx, beefKey, outpoint.Txid.String()).Bytes(); err != nil {
+		if o.Beef, err = s.DB.HGet(ctx, BeefKey, outpoint.Txid.String()).Bytes(); err != nil {
 			return nil, err
 		}
 	}
@@ -181,7 +183,7 @@ func (s *RedisStorage) UpdateConsumedBy(ctx context.Context, outpoint *overlay.O
 }
 
 func (s *RedisStorage) UpdateTransactionBEEF(ctx context.Context, txid *chainhash.Hash, beef []byte) error {
-	return s.DB.HSetNX(ctx, beefKey, txid.String(), beef).Err()
+	return s.DB.HSetNX(ctx, BeefKey, txid.String(), beef).Err()
 }
 
 func (s *RedisStorage) UpdateOutputBlockHeight(ctx context.Context, outpoint *overlay.Outpoint, topic string, blockHeight uint32, blockIndex uint64, ancelliaryBeef []byte) error {

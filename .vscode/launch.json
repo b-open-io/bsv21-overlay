@@ -37,10 +37,11 @@
             "program": "cmd/server/server.go",
             "cwd": "${workspaceFolder}",
             "env": {
-                "TOPIC_DB": "data/bsv21-topic.db",
+                "TOPIC_DB": "/mnt/md0/bsv21-topic.db",
                 "LOOKUP_DB": "data/bsv21-lookup.db",
-                "CACHE_DIR": "cache",
-                "BLOCK_HEADERS_URL": "http://rack:8082"
+                "CACHE_DIR": "/mnt/md0/cache",
+                "BLOCK_HEADERS_URL": "http://localhost:8080",
+                "REDIS": "redis://localhost:6666"
             },
             "args": [
                 "-p=3000"

@@ -3,6 +3,9 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
 	"time"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
@@ -89,53 +92,112 @@ func (l *RedisEventLookup) Close() {
 	}
 }
 
-func (l *RedisEventLookup) Lookup(ctx context.Context, q *lookup.LookupQuestion) (*lookup.LookupAnswer, error) {
+func (l *RedisEventLookup) Lookup(ctx context.Context, q *lookup.LookupQuestion) (answer *lookup.LookupAnswer, err error) {
 	question := &events.Question{}
 	if err := json.Unmarshal(q.Query, question); err != nil {
 		return nil, err
 	}
-	query := redis.ZRangeArgs{
-		Key:     eventKey(question.Event),
-		Start:   float64(question.From.Height)*1e9 + float64(question.From.Idx),
-		ByScore: true,
-		Rev:     question.Reverse,
-		Count:   int64(question.Limit),
-	}
-	if results, err := l.db.ZRangeArgs(ctx, query).Result(); err != nil {
-		return nil, err
-	} else {
-		answer := &lookup.LookupAnswer{
-			Type: lookup.AnswerTypeOutputList,
+
+	startScore := float64(question.From.Height)*1e9 + float64(question.From.Idx)
+	var outpoints []string
+	if question.Events != nil && len(question.Events) > 0 {
+		join := events.JoinTypeIntersect
+		if question.JoinType != nil {
+			join = *question.JoinType
 		}
-		for _, op := range results {
-			if outpoint, err := overlay.NewOutpointFromString(op); err != nil {
+		keys := make([]string, len(question.Events))
+		for _, event := range question.Events {
+			keys = append(keys, eventKey(event))
+		}
+		results := make([]redis.Z, 0)
+		switch join {
+		case events.JoinTypeIntersect:
+			results, err = l.db.ZInterWithScores(ctx, &redis.ZStore{
+				Aggregate: "MIN",
+				Keys:      keys,
+			}).Result()
+		case events.JoinTypeUnion:
+			results, err = l.db.ZUnionWithScores(ctx, redis.ZStore{
+				Aggregate: "MIN",
+				Keys:      keys,
+			}).Result()
+		case events.JoinTypeDifference:
+			results, err = l.db.ZDiffWithScores(ctx, keys...).Result()
+		default:
+			return nil, errors.New("invalid join type")
+		}
+		if err != nil {
+			return nil, err
+		}
+		slices.SortFunc(results, func(a, b redis.Z) int {
+			if question.Reverse {
+				if a.Score > b.Score {
+					return 1
+				} else if a.Score < b.Score {
+					return -1
+				}
+			} else {
+				if a.Score < b.Score {
+					return 1
+				} else if a.Score > b.Score {
+					return -1
+				}
+			}
+			return 0
+		})
+		for _, item := range results {
+			if question.Limit > 0 && len(outpoints) >= question.Limit {
+				break
+			} else if question.Reverse && item.Score < startScore {
+				outpoints = append(outpoints, item.Member.(string))
+			} else if !question.Reverse && item.Score > startScore {
+				outpoints = append(outpoints, item.Member.(string))
+			}
+		}
+	} else if question.Event != "" {
+		query := redis.ZRangeArgs{
+			Key:     eventKey(question.Event),
+			Start:   fmt.Sprintf("(%f", startScore),
+			Stop:    "+inf",
+			ByScore: true,
+			Rev:     question.Reverse,
+			Count:   int64(question.Limit),
+		}
+		if outpoints, err = l.db.ZRangeArgs(ctx, query).Result(); err != nil {
+			return nil, err
+		}
+	}
+	answer = &lookup.LookupAnswer{
+		Type: lookup.AnswerTypeOutputList,
+	}
+	for _, op := range outpoints {
+		if outpoint, err := overlay.NewOutpointFromString(op); err != nil {
+			return nil, err
+		} else if outpoint != nil {
+			if output, err := l.storage.FindOutput(ctx, outpoint, nil, nil, true); err != nil {
 				return nil, err
-			} else if outpoint != nil {
-				if output, err := l.storage.FindOutput(ctx, outpoint, nil, nil, true); err != nil {
+			} else if output != nil {
+				if beef, _, _, err := transaction.ParseBeef(output.Beef); err != nil {
 					return nil, err
-				} else if output != nil {
-					if beef, _, _, err := transaction.ParseBeef(output.Beef); err != nil {
+				} else {
+					if output.AncillaryBeef != nil {
+						if err = beef.MergeBeefBytes(output.AncillaryBeef); err != nil {
+							return nil, err
+						}
+					}
+					if beefBytes, err := beef.AtomicBytes(&outpoint.Txid); err != nil {
 						return nil, err
 					} else {
-						if output.AncillaryBeef != nil {
-							if err = beef.MergeBeefBytes(output.AncillaryBeef); err != nil {
-								return nil, err
-							}
-						}
-						if beefBytes, err := beef.AtomicBytes(&outpoint.Txid); err != nil {
-							return nil, err
-						} else {
-							answer.Outputs = append(answer.Outputs, &lookup.OutputListItem{
-								OutputIndex: output.Outpoint.OutputIndex,
-								Beef:        beefBytes,
-							})
-						}
+						answer.Outputs = append(answer.Outputs, &lookup.OutputListItem{
+							OutputIndex: output.Outpoint.OutputIndex,
+							Beef:        beefBytes,
+						})
 					}
 				}
 			}
 		}
-		return answer, nil
 	}
+	return answer, nil
 
 }
 

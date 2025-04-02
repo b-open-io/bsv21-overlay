@@ -17,9 +17,7 @@ import (
 	storageRedis "github.com/b-open-io/bsv21-overlay/storage/redis"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/bsv21-overlay/util"
-	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/overlay"
-	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
@@ -89,21 +87,17 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		txcount := 0
-		outcount := 0
-		// accTime
 		lastTime := time.Now()
 		for {
 			select {
 			case summary := <-done:
 				txcount += summary.tx
-				outcount += summary.out
 				// log.Println("Got done")
 
 			case <-ticker.C:
-				log.Printf("Processed tx %d o %d in %v %vtx/s\n", txcount, outcount, time.Since(lastTime), float64(txcount)/time.Since(lastTime).Seconds())
+				log.Printf("Processed tx %d in %v %vtx/s\n", txcount, time.Since(lastTime), float64(txcount)/time.Since(lastTime).Seconds())
 				lastTime = time.Now()
 				txcount = 0
-				outcount = 0
 			case <-ctx.Done():
 				log.Println("Context canceled, stopping processing...")
 				return
@@ -112,20 +106,14 @@ func main() {
 	}()
 
 	for {
-		iter := rdb.Scan(ctx, 0, "tok:*", 0).Iterator()
+		keys, err := rdb.Keys(ctx, "ev:id:*").Result()
+		if err != nil {
+			log.Fatalf("Failed to scan Redis: %v", err)
+		}
 		hasRows := false
 		var wg sync.WaitGroup
-		for iter.Next(ctx) {
+		for _, key := range keys {
 			hasRows = true
-			key := iter.Val()
-			log.Println("Processing key:", key)
-			// }
-			// break
-			// keys, err := rdb.Keys(ctx, "tok:*").Result()
-			// if err != nil {
-			// 	log.Fatalf("Failed to scan Redis: %v", err)
-			// }
-			// for _, key := range keys {
 			select {
 			case <-ctx.Done():
 				log.Println("Context canceled, stopping processing...")
@@ -139,15 +127,16 @@ func main() {
 						<-limiter
 					}()
 					parts := strings.Split(key, ":")
+					tokenId := parts[2]
 
-					tm := "tm_" + parts[1]
+					tm := "tm_" + tokenId
 					e := engine.Engine{
 						Managers: map[string]engine.TopicManager{
 							tm: topics.NewBsv21ValidatedTopicManager(
 								tm,
 								storage,
 								[]string{
-									parts[1],
+									tokenId,
 								},
 							),
 						},
@@ -161,72 +150,44 @@ func main() {
 					}
 
 					// start := time.Now()
-					txids, err := rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
+					outpoints, err := rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
+						Start:   0,
 						Stop:    "+inf",
-						Start:   "-inf",
 						Key:     key,
 						ByScore: true,
-						// Count:   1000,
+						Count:   100,
+						// Rev:     true,
 					}).Result()
 					if err != nil {
 						log.Fatalf("Failed to query Redis: %v", err)
 					}
 					// log.Println("Processing tokenId", parts[1], len(txids), "txids")
-					logTime := time.Now()
-					for _, txidStr := range txids {
+					// admitted := 0
+					// logTime := time.Now()
+					for _, op := range outpoints {
 						select {
 						case <-ctx.Done():
 							log.Println("Context canceled, stopping processing...")
 							return
 						default:
 							// log.Println("Processing", parts[1], txidStr)
-							if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
+							if outpoint, err := overlay.NewOutpointFromString(op); err != nil {
 								log.Fatalf("Invalid txid: %v", err)
-							} else if tx, err := util.LoadTx(ctx, txid); err != nil {
+							} else if tx, err := util.LoadTx(ctx, &outpoint.Txid); err != nil {
 								log.Fatalf("Failed to load transaction: %v", err)
-							} else {
-								beef := &transaction.Beef{
-									Version:      transaction.BEEF_V2,
-									Transactions: map[string]*transaction.BeefTx{},
+							} else if tx.MerklePath != nil {
+								if err := e.HandleNewMerkleProof(ctx, &outpoint.Txid, tx.MerklePath); err != nil {
+									log.Fatalf("Failed to handle new merkle proof: %v", err)
 								}
-								for _, input := range tx.Inputs {
-									if input.SourceTransaction, err = util.LoadTx(ctx, input.SourceTXID); err != nil {
-										log.Fatalf("Failed to load source transaction: %v", err)
-									} else if _, err := beef.MergeTransaction(input.SourceTransaction); err != nil {
-										log.Fatalf("Failed to merge source transaction: %v", err)
-									}
-								}
-								if _, err := beef.MergeTransaction(tx); err != nil {
-									log.Fatalf("Failed to merge source transaction: %v", err)
-								}
-
-								taggedBeef := overlay.TaggedBEEF{
-									Topics: []string{tm},
-								}
-								// log.Println("Tx Loaded", tx.TxID().String(), "in", time.Since(start))
-								// logTime := time.Now()
-								if taggedBeef.Beef, err = beef.AtomicBytes(txid); err != nil {
-									log.Fatalf("Failed to generate BEEF: %v", err)
-								} else if admit, err := e.Submit(ctx, taggedBeef, engine.SubmitModeHistorical, nil); err != nil {
-									log.Fatalf("Failed to submit transaction: %v", err)
-								} else {
-									// log.Println("Submitted generated", tx.TxID().String(), "in", time.Since(logTime))
-									// logTime = time.Now()
-									if err := rdb.ZRem(ctx, key, txidStr).Err(); err != nil {
-										log.Fatalf("Failed to delete from queue: %v", err)
-									}
-									// log.Println("Processed", txid, "in", time.Since(logTime), "as", admit[tm].OutputsToAdmit)
-									done <- &tokenSummary{
-										tx:  1,
-										out: len(admit[tm].OutputsToAdmit),
-									}
-									// start = time.Now()
-								}
+							}
+							done <- &tokenSummary{
+								tx:   1,
+								time: time.Since(time.Now()),
 							}
 						}
 					}
-					duration := time.Since(logTime)
-					log.Printf("Processed %s tx %d in %v %vtx/s\n", parts[1], len(txids), duration, float64(len(txids))/duration.Seconds())
+					// duration := time.Since(logTime)
+					// log.Printf("Processed %s tx %d in %v %vtx/s\n", parts[1], len(txids), duration, float64(len(txids))/duration.Seconds())
 				}(key)
 			}
 		}

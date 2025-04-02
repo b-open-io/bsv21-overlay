@@ -7,15 +7,26 @@ import (
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
 )
 
+type JoinType int
+
+var (
+	JoinTypeIntersect  JoinType = 0
+	JoinTypeUnion      JoinType = 1
+	JoinTypeDifference JoinType = 2
+)
+
+type BlockPos struct {
+	Height uint32 `json:"height"`
+	Idx    uint64 `json:"idx"`
+}
 type Question struct {
-	Event string `json:"event"`
-	From  struct {
-		Height uint32 `json:"height"`
-		Idx    uint64 `json:"idx"`
-	} `json:"from"`
-	Limit   int   `json:"limit"`
-	Spent   *bool `json:"spent"`
-	Reverse bool  `json:"rev"`
+	Event    string    `json:"event"`
+	Events   []string  `json:"events"`
+	JoinType *JoinType `json:"join"`
+	From     BlockPos  `json:"from"`
+	Limit    int       `json:"limit"`
+	Spent    *bool     `json:"spent"`
+	Reverse  bool      `json:"rev"`
 }
 
 type EventLookup interface {

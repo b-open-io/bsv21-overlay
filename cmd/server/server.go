@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -14,8 +15,11 @@ import (
 	lookupRedis "github.com/b-open-io/bsv21-overlay/lookups/events/redis"
 	storageRedis "github.com/b-open-io/bsv21-overlay/storage/redis"
 	"github.com/b-open-io/bsv21-overlay/topics"
+	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
+	"github.com/bsv-blockchain/go-sdk/transaction"
+	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -45,21 +49,12 @@ func init() {
 }
 
 func main() {
-	log.Println("TOPIC_DB", os.Getenv("TOPIC_DB"))
-	log.Println("LOOKUP_DB", os.Getenv("LOOKUP_DB"))
-	log.Println("CACHE_DIR", os.Getenv("CACHE_DIR"))
-	// storage, err := storage.NewSQLiteStorage(os.Getenv("TOPIC_DB"))
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// var rdb *redis.Client
-	// log.Println("Connecting to Redis", os.Getenv("REDIS"))
-	// if opts, err := redis.ParseURL(os.Getenv("REDIS")); err != nil {
-	// 	log.Fatalf("Failed to parse Redis URL: %v", err)
-	// } else {
-	// 	rdb = redis.NewClient(opts)
-	// }
-	// Initialize storage
+	hostingUrl := fmt.Sprintf("http://morovol:%d", PORT)
+	peers := []string{
+		"http://morovol:3000",
+		"http://morovol:3001",
+	}
+
 	storage, err := storageRedis.NewRedisStorage(os.Getenv("REDIS"))
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
@@ -87,15 +82,19 @@ func main() {
 			"bsv21": bsv21Lookup,
 		},
 		SyncConfiguration: map[string]engine.SyncConfiguration{
-			"bsv21": {
-				Type: engine.SyncConfigurationPeers,
-				Peers: []string{
-					"http://morovol:3000",
-					"http://morovol:3001",
-				},
+			"tm_ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0": {
+				Type:  engine.SyncConfigurationPeers,
+				Peers: peers,
 			},
 		},
-		HostingURL:   fmt.Sprintf("http://morovol:%d", PORT),
+		Broadcaster: &broadcaster.Arc{
+			ApiUrl: "https://arc.taal.com",
+			// ApiKey:  os.Getenv("ARC_API_KEY"),
+			WaitFor: broadcaster.ACCEPTED_BY_NETWORK,
+			// CallbackUrl:   hostingUrl + "/arc-ingest",
+			// CallbackToken: callbackToken,
+		},
+		HostingURL:   hostingUrl,
 		Storage:      storage,
 		ChainTracker: chaintracker,
 		Verbose:      true,
@@ -108,6 +107,33 @@ func main() {
 	// Define a simple GET route
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("Hello, World!")
+	})
+
+	app.Post("/submit", func(c *fiber.Ctx) error {
+		topicsHeader := c.Get("x-topics", "")
+		if topicsHeader == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Missing x-topics header",
+			})
+		}
+		taggedBeef := overlay.TaggedBEEF{}
+		if err := json.Unmarshal([]byte(topicsHeader), &taggedBeef.Topics); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid x-topics header",
+			})
+		}
+		copy(taggedBeef.Beef, c.Body())
+		onSteakReady := func(steak *overlay.Steak) {
+			return
+		}
+		if steak, err := e.Submit(c.Context(), taggedBeef, engine.SubmitModeCurrent, onSteakReady); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		} else {
+			return c.JSON(steak)
+		}
+
 	})
 
 	app.Post("/requestSyncResponse", func(c *fiber.Ctx) error {
@@ -157,6 +183,31 @@ func main() {
 			})
 		} else {
 			return c.JSON(answer)
+		}
+	})
+
+	app.Post("/arc-ingest", func(c *fiber.Ctx) error {
+		var status broadcaster.ArcResponse
+		if err := c.BodyParser(&status); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid request",
+			})
+		} else if txid, err := chainhash.NewHashFromHex(status.Txid); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid txid",
+			})
+		} else if merklePath, err := transaction.NewMerklePathFromHex(status.MerklePath); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid merkle path",
+			})
+		} else if err := e.HandleNewMerkleProof(c.Context(), txid, merklePath); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		} else {
+			return c.JSON(fiber.Map{
+				"status": "success",
+			})
 		}
 	})
 

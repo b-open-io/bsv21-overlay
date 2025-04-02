@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -77,50 +78,60 @@ func main() {
 			time.Sleep(1 * time.Second)
 		} else {
 			log.Println("Processing", len(txids), "txids")
+			var wg sync.WaitGroup
+			limiter := make(chan struct{}, 16)
 			for _, txidStr := range txids {
-				if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
-					log.Fatalf("Failed to parse txid: %v", err)
-				} else if tx, err := util.LoadTx(ctx, txid); err != nil {
-					log.Fatalf("Failed to load tx: %v", err)
-				} else {
-					tokenIds := make(map[string]struct{})
-					for vout, output := range tx.Outputs {
-						b := bsv21.Decode(output.LockingScript)
-						if b != nil {
-							if b.Op == string(bsv21.OpMint) {
-								b.Id = (&overlay.Outpoint{
-									Txid:        *txid,
-									OutputIndex: uint32(vout),
-								}).OrdinalString()
+				wg.Add(1)
+				limiter <- struct{}{}
+				go func(txidStr string) {
+					defer func() {
+						wg.Done()
+						<-limiter
+					}()
+					if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
+						log.Fatalf("Failed to parse txid: %v", err)
+					} else if tx, err := util.LoadTx(ctx, txid); err != nil {
+						log.Fatalf("Failed to load tx: %v", err)
+					} else {
+						tokenIds := make(map[string]struct{})
+						for vout, output := range tx.Outputs {
+							b := bsv21.Decode(output.LockingScript)
+							if b != nil {
+								if b.Op == string(bsv21.OpMint) {
+									b.Id = (&overlay.Outpoint{
+										Txid:        *txid,
+										OutputIndex: uint32(vout),
+									}).OrdinalString()
+								}
+								tokenIds[b.Id] = struct{}{}
 							}
-							tokenIds[b.Id] = struct{}{}
 						}
-					}
-					if len(tokenIds) > 0 {
-						var score float64
-						if tx.MerklePath != nil {
-							score = float64(tx.MerklePath.BlockHeight) * 1e9
-							for _, leaf := range tx.MerklePath.Path[0] {
-								if leaf.Hash != nil && leaf.Hash.Equal(*txid) {
-									score += float64(leaf.Offset)
-									break
+						if len(tokenIds) > 0 {
+							var score float64
+							if tx.MerklePath != nil {
+								score = float64(tx.MerklePath.BlockHeight) * 1e9
+								for _, leaf := range tx.MerklePath.Path[0] {
+									if leaf.Hash != nil && leaf.Hash.Equal(*txid) {
+										score += float64(leaf.Offset)
+										break
+									}
+								}
+
+							}
+							for tokenId := range tokenIds {
+								if _, err := rdb.ZAdd(ctx, "tok:"+tokenId, redis.Z{
+									Score:  score,
+									Member: txidStr,
+								}).Result(); err != nil {
+									log.Fatalf("Failed to set token in Redis: %v", err)
 								}
 							}
-
 						}
-						for tokenId := range tokenIds {
-							if _, err := rdb.ZAdd(ctx, "tok:"+tokenId, redis.Z{
-								Score:  score,
-								Member: txidStr,
-							}).Result(); err != nil {
-								log.Fatalf("Failed to set token in Redis: %v", err)
-							}
+						if err := rdb.ZRem(ctx, "bsv21", txidStr).Err(); err != nil {
+							log.Fatalf("Failed to remove from Redis: %v", err)
 						}
 					}
-					if err := rdb.ZRem(ctx, "bsv21", txidStr).Err(); err != nil {
-						log.Fatalf("Failed to remove from Redis: %v", err)
-					}
-				}
+				}(txidStr)
 			}
 			duration := time.Since(start)
 			log.Printf("Processed %d txids in %s, %vtx/s\n", len(txids), duration, float64(len(txids))/duration.Seconds())
