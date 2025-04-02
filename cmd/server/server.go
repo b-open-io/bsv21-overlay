@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
+	"github.com/bsv-blockchain/go-sdk/overlay/topic"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
@@ -125,7 +127,6 @@ func main() {
 		HostingURL:   hostingUrl,
 		Storage:      storage,
 		ChainTracker: chaintracker,
-		Verbose:      true,
 		PanicOnError: true,
 	}
 	iter := rdb.Scan(ctx, 0, "tm:*", 10000).Iterator()
@@ -171,7 +172,20 @@ func main() {
 		}
 		copy(taggedBeef.Beef, c.Body())
 		onSteakReady := func(steak *overlay.Steak) {
-			return
+			for top, admit := range *steak {
+				if sync, ok := e.SyncConfiguration[top]; !ok {
+					continue
+				} else if sync.Type == engine.SyncConfigurationPeers && len(admit.CoinsToRetain) > 0 || len(admit.OutputsToAdmit) > 0 {
+					for _, peer := range sync.Peers {
+						if _, err := (&topic.HTTPSOverlayBroadcastFacilitator{Client: http.DefaultClient}).Send(peer, &overlay.TaggedBEEF{
+							Beef:   taggedBeef.Beef,
+							Topics: []string{top},
+						}); err != nil {
+							log.Printf("Error submitting taggedBEEF to peer %s: %v", peer, err)
+						}
+					}
+				}
+			}
 		}
 		if steak, err := e.Submit(c.Context(), taggedBeef, engine.SubmitModeCurrent, onSteakReady); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

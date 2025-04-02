@@ -20,11 +20,14 @@
             "program": "cmd/server/server.go",
             "cwd": "${workspaceFolder}",
             "env": {
-                "BLOCK_HEADERS_URL": "http://rack:8082",
-                "REDIS": "redis://localhost:6666"
+                "BLOCK_HEADERS_URL": "http://localhost:8080",
+                "REDIS": "redis://localhost:6666",
+                "JUNGLEBUS":"https://texas1.junglebus.gorillapool.io",
+                // "PEERS":"https://bsv21.overlay.gorillapool.io,http://shack:8081",
+                "HOSTING_URL": "https://bsv21.overlay.gorillapool.io"
             },
             "args": [
-                "-p=3001",
+                "-p=8081",
                 "-s=true"
             ]
         },
@@ -37,10 +40,12 @@
             "cwd": "${workspaceFolder}",
             "env": {
                 "BLOCK_HEADERS_URL": "http://localhost:8080",
-                "REDIS": "redis://localhost:6666"
+                "REDIS": "redis://localhost:6666",
+                "JUNGLEBUS":"https://texas1.junglebus.gorillapool.io",
+                "HOSTING_URL": "https://bsv21.overlay.gorillapool.io"
             },
             "args": [
-                "-p=3000"
+                "-p=8081"
             ]
         }
     ]
