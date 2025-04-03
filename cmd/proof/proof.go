@@ -143,7 +143,6 @@ func main() {
 						},
 						Storage:      storage,
 						ChainTracker: chaintracker,
-						Verbose:      false,
 						PanicOnError: true,
 					}
 
