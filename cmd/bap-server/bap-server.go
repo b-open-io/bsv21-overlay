@@ -40,6 +40,13 @@ var SYNC bool
 var rdb, sub *redis.Client
 var peers = []string{}
 
+type subRequest struct {
+	topics []string
+	writer *bufio.Writer
+}
+
+var subscribe = make(chan *subRequest, 100)   // Buffered channel
+var unsubscribe = make(chan *subRequest, 100) // Buffered channel
 func init() {
 	godotenv.Load("../../.env")
 	chaintracker = headers_client.Client{
@@ -249,14 +256,42 @@ func main() {
 		}
 	})
 
-	type subRequest struct {
-		topics []string
-		writer *bufio.Writer
-	}
+	app.Get("/subscribe/:topics", func(c *fiber.Ctx) error {
+		topicsParam := c.Params("topics")
+		if topicsParam == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Missing topics",
+			})
+		}
+		topics := strings.Split(topicsParam, ",")
+		if len(topics) == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "No topics provided",
+			})
+		}
 
-	var subscribe = make(chan *subRequest, 100)   // Buffered channel
-	var unsubscribe = make(chan *subRequest, 100) // Buffered channel
+		// Set headers for SSE
+		c.Set("Content-Type", "text/event-stream")
+		c.Set("Cache-Control", "no-cache")
+		c.Set("Connection", "keep-alive")
 
+		// Add the client to the topicClients map
+		writer := bufio.NewWriter(c.Context().Response.BodyWriter())
+		subReq := &subRequest{
+			topics: topics,
+			writer: writer,
+		}
+		subscribe <- subReq
+
+		// Wait for the client to disconnect
+		<-c.Context().Done()
+		unsubscribe <- subReq
+
+		log.Println("Client disconnected:", topics)
+		return nil
+	})
+
+	// Start the Redis PubSub goroutine
 	go func() {
 		pubSub := sub.PSubscribe(ctx, "*")
 		pubSubChan := pubSub.Channel() // Subscribe to all topics
@@ -306,41 +341,6 @@ func main() {
 			}
 		}
 	}()
-
-	app.Get("/subscribe/:topics", func(c *fiber.Ctx) error {
-		topicsParam := c.Params("topics")
-		if topicsParam == "" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Missing topics",
-			})
-		}
-		topics := strings.Split(topicsParam, ",")
-		if len(topics) == 0 {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-				"error": "No topics provided",
-			})
-		}
-
-		// Set headers for SSE
-		c.Set("Content-Type", "text/event-stream")
-		c.Set("Cache-Control", "no-cache")
-		c.Set("Connection", "keep-alive")
-
-		// Add the client to the topicClients map
-		writer := bufio.NewWriter(c.Context().Response.BodyWriter())
-		subReq := &subRequest{
-			topics: topics,
-			writer: writer,
-		}
-		subscribe <- subReq
-
-		// Wait for the client to disconnect
-		<-c.Context().Done()
-		unsubscribe <- subReq
-
-		log.Println("Client disconnected:", topics)
-		return nil
-	})
 
 	// Goroutine to handle OS signals
 	go func() {

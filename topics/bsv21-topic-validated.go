@@ -48,7 +48,6 @@ type tokenSummary struct {
 }
 
 func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissableOutputs(ctx context.Context, beefBytes []byte, previousCoins []uint32) (admit overlay.AdmittanceInstructions, err error) {
-	var tx *transaction.Transaction
 	beef, tx, txid, err := transaction.ParseBeef(beefBytes)
 	if err != nil {
 		return admit, err
