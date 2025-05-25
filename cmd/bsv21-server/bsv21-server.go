@@ -16,7 +16,6 @@ import (
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/4chain-ag/go-overlay-services/pkg/core/gasp/core"
 	"github.com/b-open-io/bsv21-overlay/lookups"
-	lookupRedis "github.com/b-open-io/bsv21-overlay/lookups/events/redis"
 	storageRedis "github.com/b-open-io/bsv21-overlay/storage/redis"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
@@ -106,16 +105,12 @@ func main() {
 	}
 	defer storage.Close()
 
-	eventLookup, err := lookupRedis.NewRedisEventLookup(
-		os.Getenv("REDIS"),
-		storage,
-	)
+	bsv21Lookup, err := lookups.NewBsv21EventsLookup(os.Getenv("REDIS"), storage, "bsv21")
 	if err != nil {
-		log.Fatalf("Failed to initialize event lookup: %v", err)
+		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
-	bsv21Lookup := &lookups.Bsv21EventsLookup{
-		EventLookup: eventLookup,
-	}
+	// 	EventLookup: eventLookup,
+	// }
 	e := engine.Engine{
 		Managers: map[string]engine.TopicManager{},
 		LookupServices: map[string]engine.LookupService{

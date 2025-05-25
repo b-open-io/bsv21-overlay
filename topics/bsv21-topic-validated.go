@@ -2,13 +2,10 @@ package topics
 
 import (
 	"context"
-	"errors"
-	"slices"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bsv-blockchain/go-sdk/overlay"
-	"github.com/bsv-blockchain/go-sdk/script"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 )
 
@@ -47,9 +44,9 @@ type tokenSummary struct {
 	deploy    bool
 }
 
-func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissableOutputs(ctx context.Context, beefBytes []byte, previousCoins []uint32) (admit overlay.AdmittanceInstructions, err error) {
+func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissableOutputs(ctx context.Context, beefBytes []byte, previousCoins map[uint32]*transaction.TransactionOutput) (admit overlay.AdmittanceInstructions, err error) {
 	var tx *transaction.Transaction
-	beef, tx, txid, err := transaction.ParseBeef(beefBytes)
+	_, tx, txid, err := transaction.ParseBeef(beefBytes)
 	if err != nil {
 		return admit, err
 	} else if tx == nil {
@@ -85,24 +82,15 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissableOutputs(ctx context.Cont
 		}
 	}
 
-	// deps := make(map[string]*chainhash.Hash, len(tx.Inputs))
 	if len(summary) > 0 {
 		for vin, txin := range tx.Inputs {
-			if slices.Contains(previousCoins, uint32(vin)) {
+			if txout, ok := previousCoins[uint32(vin)]; ok {
 				outpoint := &overlay.Outpoint{
 					Txid:        *txin.SourceTXID,
 					OutputIndex: txin.SourceTxOutIndex,
 				}
-				var script *script.Script
-				if sourceTx := beef.FindTransaction(txin.SourceTXID.String()); sourceTx != nil {
-					script = sourceTx.Outputs[txin.SourceTxOutIndex].LockingScript
-				} else if output, err := tm.storage.FindOutput(ctx, outpoint, &tm.topic, nil, false); err != nil {
-					return admit, errors.New("missing input")
-				} else {
-					script = output.Script
-				}
 
-				if b := bsv21.Decode(script); b != nil {
+				if b := bsv21.Decode(txout.LockingScript); b != nil {
 					if b.Op == string(bsv21.OpMint) {
 						b.Id = outpoint.OrdinalString()
 					}
@@ -124,9 +112,6 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissableOutputs(ctx context.Cont
 				admit.OutputsToAdmit = append(admit.OutputsToAdmit, token.vouts...)
 			}
 		}
-		// for _, depId := range deps {
-		// 	admit.AncillaryTxids = append(admit.AncillaryTxids, depId)
-		// }
 	}
 
 	return

@@ -84,10 +84,10 @@ func (s *RedisStorage) FindOutput(ctx context.Context, outpoint *overlay.Outpoin
 	return
 }
 
-func (s *RedisStorage) FindOutputs(ctx context.Context, outpoints []*overlay.Outpoint, topic *string, spent *bool, includeBEEF bool) ([]*engine.Output, error) {
+func (s *RedisStorage) FindOutputs(ctx context.Context, outpoints []*overlay.Outpoint, topic string, spent *bool, includeBEEF bool) ([]*engine.Output, error) {
 	outputs := make([]*engine.Output, 0, len(outpoints))
 	for _, outpoint := range outpoints {
-		if output, err := s.FindOutput(ctx, outpoint, topic, spent, includeBEEF); err != nil {
+		if output, err := s.FindOutput(ctx, outpoint, &topic, spent, includeBEEF); err != nil {
 			return nil, err
 		} else {
 			outputs = append(outputs, output)
