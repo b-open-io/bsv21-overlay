@@ -13,7 +13,6 @@ import (
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/GorillaPool/go-junglebus"
 	"github.com/b-open-io/bsv21-overlay/lookups"
-	lookupRedis "github.com/b-open-io/bsv21-overlay/lookups/events/redis"
 	storageRedis "github.com/b-open-io/bsv21-overlay/storage/redis"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/bsv21-overlay/util"
@@ -72,12 +71,13 @@ func main() {
 	}
 	defer storage.Close()
 
-	eventLookup, err := lookupRedis.NewRedisEventLookup(
+	bsv21Lookup, err := lookups.NewBsv21EventsLookup(
 		os.Getenv("REDIS"),
 		storage,
+		"bsv21",
 	)
-	bsv21Lookup := &lookups.Bsv21EventsLookup{
-		EventLookup: eventLookup,
+	if err != nil {
+		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
 
 	limiter := make(chan struct{}, 24)
@@ -143,7 +143,6 @@ func main() {
 						},
 						Storage:      storage,
 						ChainTracker: chaintracker,
-						PanicOnError: true,
 					}
 
 					// start := time.Now()

@@ -380,7 +380,7 @@ func (s *SQLiteStorage) MarkUTXOAsSpent(ctx context.Context, outpoint *overlay.O
 	return err
 }
 
-func (s *SQLiteStorage) MarkUTXOsAsSpent(ctx context.Context, outpoints []*overlay.Outpoint, topic string) error {
+func (s *SQLiteStorage) MarkUTXOsAsSpent(ctx context.Context, outpoints []*overlay.Outpoint, topic string, spendingTxid *chainhash.Hash) error {
 	query := `
         UPDATE outputs
         SET spent = true

@@ -169,7 +169,7 @@ func (s *RedisStorage) MarkUTXOAsSpent(ctx context.Context, outpoint *overlay.Ou
 	return s.DB.HSet(ctx, outputTopicKey(outpoint, topic), "sp", true).Err()
 }
 
-func (s *RedisStorage) MarkUTXOsAsSpent(ctx context.Context, outpoints []*overlay.Outpoint, topic string) error {
+func (s *RedisStorage) MarkUTXOsAsSpent(ctx context.Context, outpoints []*overlay.Outpoint, topic string, spendingTxid *chainhash.Hash) error {
 	for _, outpoint := range outpoints {
 		if err := s.MarkUTXOAsSpent(ctx, outpoint, topic); err != nil {
 			return err

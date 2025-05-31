@@ -124,7 +124,6 @@ func main() {
 		HostingURL:   hostingUrl,
 		Storage:      storage,
 		ChainTracker: chaintracker,
-		PanicOnError: true,
 	}
 	if tms, err := rdb.SMembers(ctx, "topics").Result(); err != nil {
 		log.Fatalf("Failed to get topics from Redis: %v", err)
@@ -214,6 +213,7 @@ func main() {
 
 	app.Post("/requestForeignGASPNode", func(c *fiber.Ctx) error {
 		var request core.GASPNodeRequest
+		topic := c.Get("x-bsv-topic", "bsv21")
 		if err := c.BodyParser(&request); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "Invalid request",
@@ -222,6 +222,7 @@ func main() {
 			c.Context(),
 			request.GraphID,
 			&overlay.Outpoint{Txid: *request.Txid, OutputIndex: request.OutputIndex},
+			topic,
 		); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": err.Error(),

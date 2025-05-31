@@ -35,7 +35,7 @@ func (tm *Bsv21TopicManager) HasTokenId(tokenId string) bool {
 	return ok
 }
 
-func (tm *Bsv21TopicManager) IdentifyAdmissableOutputs(ctx context.Context, beefBytes []byte, previousCoins []uint32) (admit overlay.AdmittanceInstructions, err error) {
+func (tm *Bsv21TopicManager) IdentifyAdmissibleOutputs(ctx context.Context, beefBytes []byte, previousCoins []uint32) (admit overlay.AdmittanceInstructions, err error) {
 	var tx *transaction.Transaction
 	_, tx, txid, err := transaction.ParseBeef(beefBytes)
 	if err != nil {

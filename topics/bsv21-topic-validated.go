@@ -44,7 +44,7 @@ type tokenSummary struct {
 	deploy    bool
 }
 
-func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissableOutputs(ctx context.Context, beefBytes []byte, previousCoins map[uint32]*transaction.TransactionOutput) (admit overlay.AdmittanceInstructions, err error) {
+func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Context, beefBytes []byte, previousCoins map[uint32]*transaction.TransactionOutput) (admit overlay.AdmittanceInstructions, err error) {
 	var tx *transaction.Transaction
 	_, tx, txid, err := transaction.ParseBeef(beefBytes)
 	if err != nil {
