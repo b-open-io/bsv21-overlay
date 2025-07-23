@@ -10,12 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
-	"github.com/GorillaPool/go-junglebus"
 	"github.com/b-open-io/bsv21-overlay/lookups"
-	storageRedis "github.com/b-open-io/bsv21-overlay/storage/redis"
 	"github.com/b-open-io/bsv21-overlay/topics"
-	"github.com/b-open-io/bsv21-overlay/util"
+	"github.com/b-open-io/overlay/beef"
+	"github.com/b-open-io/overlay/publish"
+	"github.com/b-open-io/overlay/storage"
+	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/transaction"
@@ -25,9 +25,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var JUNGLEBUS = "https://texas1.junglebus.gorillapool.io"
-var jb *junglebus.Client
-var chaintracker headers_client.Client
+var beefStorage beef.BeefStorage
+var publisher publish.Publisher
+var store engine.Storage
+var chaintracker *headers_client.Client
 
 type tokenSummary struct {
 	tx   int
@@ -37,10 +38,36 @@ type tokenSummary struct {
 
 func init() {
 	godotenv.Load("../../.env")
-	jb, _ = junglebus.New(
-		junglebus.WithHTTP(JUNGLEBUS),
-	)
-	chaintracker = headers_client.Client{
+
+	// Set up BEEF storage
+	redisBeefURL := os.Getenv("REDIS_BEEF")
+	if redisBeefURL == "" {
+		redisBeefURL = os.Getenv("REDIS")
+	}
+	var err error
+	beefStorage, err = beef.NewRedisBeefStorage(redisBeefURL, 0)
+	if err != nil {
+		log.Fatalf("Failed to create BEEF storage: %v", err)
+	}
+
+	// Set up publisher
+	publisher, err = publish.NewRedisPublish(os.Getenv("REDIS"))
+	if err != nil {
+		log.Fatalf("Failed to create publisher: %v", err)
+	}
+
+	// Set up storage
+	mongoURL := os.Getenv("MONGO_URL")
+	if mongoURL == "" {
+		mongoURL = "mongodb://localhost:27017"
+	}
+	store, err = storage.NewMongoStorage(mongoURL, "mnee", beefStorage, publisher)
+	if err != nil {
+		log.Fatalf("Failed to create storage: %v", err)
+	}
+
+	// Set up chain tracker
+	chaintracker = &headers_client.Client{
 		Url:    os.Getenv("BLOCK_HEADERS_URL"),
 		ApiKey: os.Getenv("BLOCK_HEADERS_API_KEY"),
 	}
@@ -66,18 +93,13 @@ func main() {
 	} else {
 		rdb = redis.NewClient(opts)
 	}
-	// Initialize storage
-	storage, err := storageRedis.NewRedisStorage(os.Getenv("REDIS"))
-	if err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
-	}
-	defer storage.Close()
+	// Storage is already initialized in init()
 
-	bsv21Lookup, err := lookups.NewBsv21EventsLookup(
-		os.Getenv("REDIS"),
-		storage,
-		"bsv21",
-	)
+	mongoURL := os.Getenv("MONGO_URL")
+	if mongoURL == "" {
+		mongoURL = "mongodb://localhost:27017"
+	}
+	bsv21Lookup, err := lookups.NewBsv21EventsLookup(mongoURL, "mnee")
 	if err != nil {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
@@ -137,16 +159,16 @@ func main() {
 						Managers: map[string]engine.TopicManager{
 							tm: topics.NewBsv21ValidatedTopicManager(
 								tm,
-								storage,
+								store,
 								[]string{
 									tokenId,
 								},
 							),
 						},
 						LookupServices: map[string]engine.LookupService{
-							"bsv21": bsv21Lookup,
+							"mnee": bsv21Lookup,
 						},
-						Storage:      storage,
+						Storage:      store,
 						ChainTracker: chaintracker,
 					}
 
@@ -172,21 +194,21 @@ func main() {
 							// log.Println("Processing", parts[1], txidStr)
 							if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
 								log.Fatalf("Invalid txid: %v", err)
-							} else if tx, err := util.LoadTx(ctx, txid); err != nil {
+							} else if tx, err := beefStorage.LoadTx(ctx, txid, chaintracker); err != nil {
 								log.Fatalf("Failed to load transaction: %v", err)
 							} else {
-								beef := &transaction.Beef{
+								beefDoc := &transaction.Beef{
 									Version:      transaction.BEEF_V2,
-									Transactions: map[string]*transaction.BeefTx{},
+									Transactions: map[chainhash.Hash]*transaction.BeefTx{},
 								}
 								for _, input := range tx.Inputs {
-									if input.SourceTransaction, err = util.LoadTx(ctx, input.SourceTXID); err != nil {
+									if input.SourceTransaction, err = beefStorage.LoadTx(ctx, input.SourceTXID, chaintracker); err != nil {
 										log.Fatalf("Failed to load source transaction: %v", err)
-									} else if _, err := beef.MergeTransaction(input.SourceTransaction); err != nil {
+									} else if _, err := beefDoc.MergeTransaction(input.SourceTransaction); err != nil {
 										log.Fatalf("Failed to merge source transaction: %v", err)
 									}
 								}
-								if _, err := beef.MergeTransaction(tx); err != nil {
+								if _, err := beefDoc.MergeTransaction(tx); err != nil {
 									log.Fatalf("Failed to merge source transaction: %v", err)
 								}
 
@@ -194,8 +216,8 @@ func main() {
 									Topics: []string{tm},
 								}
 								// log.Println("Tx Loaded", tx.TxID().String(), "in", time.Since(start))
-								// logTime := time.Now()
-								if taggedBeef.Beef, err = beef.AtomicBytes(txid); err != nil {
+								logTime := time.Now()
+								if taggedBeef.Beef, err = beefDoc.AtomicBytes(txid); err != nil {
 									log.Fatalf("Failed to generate BEEF: %v", err)
 								} else if admit, err := e.Submit(ctx, taggedBeef, engine.SubmitModeHistorical, nil); err != nil {
 									log.Fatalf("Failed to submit transaction: %v", err)
@@ -205,7 +227,7 @@ func main() {
 									if err := rdb.ZRem(ctx, key, txidStr).Err(); err != nil {
 										log.Fatalf("Failed to delete from queue: %v", err)
 									}
-									// log.Println("Processed", txid, "in", time.Since(logTime), "as", admit[tm].OutputsToAdmit)
+									log.Println("Processed", txid, "in", time.Since(logTime), "as", admit[tm].OutputsToAdmit)
 									done <- &tokenSummary{
 										tx:  1,
 										out: len(admit[tm].OutputsToAdmit),

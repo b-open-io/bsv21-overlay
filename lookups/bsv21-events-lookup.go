@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
+	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/b-open-io/overlay/lookup/events"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bitcoin-sv/go-templates/template/bsv21/ltm"
@@ -19,16 +19,16 @@ import (
 )
 
 type Bsv21EventsLookup struct {
-	events.RedisEventLookup
+	events.MongoEventLookup
 }
 
-func NewBsv21EventsLookup(connString string, storage engine.Storage, topic string) (*Bsv21EventsLookup, error) {
-	r, err := events.NewRedisEventLookup(connString, storage, topic)
+func NewBsv21EventsLookup(connString string, dbName string) (*Bsv21EventsLookup, error) {
+	m, err := events.NewMongoEventLookup(connString, dbName)
 	if err != nil {
 		return nil, err
 	}
 	return &Bsv21EventsLookup{
-		RedisEventLookup: *r,
+		MongoEventLookup: *m,
 	}, nil
 }
 

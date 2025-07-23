@@ -4,17 +4,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/b-open-io/bsv21-overlay/lookups/events"
+	"github.com/b-open-io/overlay/lookup/events"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/script"
+	"github.com/bsv-blockchain/go-sdk/transaction"
 )
 
 type Bsv21IdLookup struct {
 	events.EventLookup
 }
 
-func (l *Bsv21IdLookup) OutputAdded(ctx context.Context, outpoint *overlay.Outpoint, outputScript *script.Script, topic string, blockHeight uint32, blockIdx uint64) error {
+func (l *Bsv21IdLookup) OutputAdded(ctx context.Context, outpoint *transaction.Outpoint, outputScript *script.Script, topic string, blockHeight uint32, blockIdx uint64) error {
 	if b := bsv21.Decode(outputScript); b != nil {
 		if b.Op == string(bsv21.OpMint) {
 			b.Id = outpoint.OrdinalString()

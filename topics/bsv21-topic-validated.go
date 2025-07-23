@@ -3,7 +3,7 @@ package topics
 import (
 	"context"
 
-	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
+	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/transaction"
@@ -57,9 +57,9 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 	for vout, output := range tx.Outputs {
 		if b := bsv21.Decode(output.LockingScript); b != nil {
 			if b.Op == string(bsv21.OpMint) {
-				b.Id = (&overlay.Outpoint{
+				b.Id = (&transaction.Outpoint{
 					Txid:        *txid,
-					OutputIndex: uint32(vout),
+					Index: uint32(vout),
 				}).OrdinalString()
 			}
 			if !tm.HasTokenId(b.Id) {
@@ -85,9 +85,9 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 	if len(summary) > 0 {
 		for vin, txin := range tx.Inputs {
 			if txout, ok := previousCoins[uint32(vin)]; ok {
-				outpoint := &overlay.Outpoint{
+				outpoint := &transaction.Outpoint{
 					Txid:        *txin.SourceTXID,
-					OutputIndex: txin.SourceTxOutIndex,
+					Index: txin.SourceTxOutIndex,
 				}
 
 				if b := bsv21.Decode(txout.LockingScript); b != nil {
@@ -117,7 +117,7 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 	return
 }
 
-func (tm *Bsv21ValidatedTopicManager) IdentifyNeededInputs(ctx context.Context, beefBytes []byte) ([]*overlay.Outpoint, error) {
+func (tm *Bsv21ValidatedTopicManager) IdentifyNeededInputs(ctx context.Context, beefBytes []byte) ([]*transaction.Outpoint, error) {
 	beef, tx, _, err := transaction.ParseBeef(beefBytes)
 	if err != nil {
 		return nil, err
@@ -138,12 +138,12 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyNeededInputs(ctx context.Context, 
 	if len(tokens) == 0 {
 		return nil, nil
 	}
-	var inputs []*overlay.Outpoint
+	var inputs []*transaction.Outpoint
 	for _, txin := range tx.Inputs {
 		if inTx := beef.FindTransaction(txin.SourceTXID.String()); inTx != nil {
-			outpoint := &overlay.Outpoint{
+			outpoint := &transaction.Outpoint{
 				Txid:        *txin.SourceTXID,
-				OutputIndex: txin.SourceTxOutIndex,
+				Index: txin.SourceTxOutIndex,
 			}
 			script := inTx.Outputs[txin.SourceTxOutIndex].LockingScript
 			if b := bsv21.Decode(script); b != nil {
