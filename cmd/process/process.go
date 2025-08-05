@@ -93,16 +93,32 @@ func main() {
 	} else {
 		rdb = redis.NewClient(opts)
 	}
+	defer func() {
+		if rdb != nil {
+			if err := rdb.Close(); err != nil {
+				log.Printf("Error closing Redis connection: %v", err)
+			}
+		}
+	}()
+	
 	// Storage is already initialized in init()
 
 	mongoURL := os.Getenv("MONGO_URL")
 	if mongoURL == "" {
 		mongoURL = "mongodb://localhost:27017"
 	}
-	bsv21Lookup, err := lookups.NewBsv21EventsLookup(mongoURL, "mnee")
+	bsv21Lookup, err := lookups.NewBsv21EventsLookup(mongoURL, "mnee", store)
 	if err != nil {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
+	defer func() {
+		if bsv21Lookup != nil {
+			if err := bsv21Lookup.Close(); err != nil {
+				log.Printf("Error closing bsv21 lookup: %v", err)
+			}
+		}
+		log.Println("Application shutdown complete.")
+	}()
 
 	limiter := make(chan struct{}, 16)
 	done := make(chan *tokenSummary, 1000)
@@ -132,6 +148,13 @@ func main() {
 	}()
 
 	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Context canceled, exiting main loop...")
+			return
+		default:
+		}
+		
 		iter := rdb.Scan(ctx, 0, "tok:*", 0).Iterator()
 		hasRows := false
 		var wg sync.WaitGroup
@@ -140,7 +163,8 @@ func main() {
 			key := iter.Val()
 			select {
 			case <-ctx.Done():
-				log.Println("Context canceled, stopping processing...")
+				log.Println("Context canceled, waiting for active goroutines...")
+				wg.Wait()
 				return
 			default:
 				limiter <- struct{}{}
@@ -244,12 +268,13 @@ func main() {
 		}
 		wg.Wait()
 		if !hasRows {
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+				// Continue to next iteration
+			}
 		}
 		// log.Println("Waiting for all goroutines to finish...")
 	}
-
-	// Close the database connection
-	// sub.QueueDb.Close()
-	log.Println("Application shutdown complete.")
 }

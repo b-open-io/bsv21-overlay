@@ -121,14 +121,15 @@ func main() {
 						if len(tokenIds) > 0 {
 							var score float64
 							if tx.MerklePath != nil {
-								score = float64(tx.MerklePath.BlockHeight) * 1e9
+								score = float64(tx.MerklePath.BlockHeight)
 								for _, leaf := range tx.MerklePath.Path[0] {
 									if leaf.Hash != nil && leaf.Hash.Equal(*txid) {
-										score += float64(leaf.Offset)
+										score += float64(leaf.Offset) / 1e9
 										break
 									}
 								}
-
+							} else {
+								score = float64(time.Now().Unix())
 							}
 							for tokenId := range tokenIds {
 								if _, err := rdb.ZAdd(ctx, "tok:"+tokenId, redis.Z{

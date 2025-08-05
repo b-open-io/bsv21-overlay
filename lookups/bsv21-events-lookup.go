@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/b-open-io/overlay/lookup/events"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bitcoin-sv/go-templates/template/bsv21/ltm"
 	"github.com/bitcoin-sv/go-templates/template/bsv21/pow20"
 	"github.com/bitcoin-sv/go-templates/template/cosign"
 	"github.com/bitcoin-sv/go-templates/template/ordlock"
+	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/script"
 	"github.com/bsv-blockchain/go-sdk/transaction"
@@ -22,8 +22,8 @@ type Bsv21EventsLookup struct {
 	events.MongoEventLookup
 }
 
-func NewBsv21EventsLookup(connString string, dbName string) (*Bsv21EventsLookup, error) {
-	m, err := events.NewMongoEventLookup(connString, dbName)
+func NewBsv21EventsLookup(connString string, dbName string, storage engine.Storage) (*Bsv21EventsLookup, error) {
+	m, err := events.NewMongoEventLookup(connString, dbName, storage)
 	if err != nil {
 		return nil, err
 	}
@@ -59,22 +59,31 @@ func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *
 		events = append(events, fmt.Sprintf("id:%s", b.Id))
 		suffix := script.NewFromBytes(b.Insc.ScriptSuffix)
 		if p := p2pkh.Decode(suffix, true); p != nil {
-			events = append(events, fmt.Sprintf("p2pkh:%s", p.AddressString))
+			events = append(events, fmt.Sprintf("p2pkh:%s:%s", p.AddressString, b.Id))
 		} else if c := cosign.Decode(suffix); c != nil {
-			events = append(events, fmt.Sprintf("cos:%s", c.Address))
-			events = append(events, fmt.Sprintf("cos:%s", c.Cosigner))
+			events = append(events, fmt.Sprintf("cos:%s:%s", c.Address, b.Id))
+			// events = append(events, fmt.Sprintf("cos:%s:%s", c.Cosigner, b.Id))
 		} else if ltm := ltm.Decode(suffix); ltm != nil {
 			events = append(events, fmt.Sprintf("ltm:%s", b.Id))
 		} else if pow20 := pow20.Decode(suffix); pow20 != nil {
 			events = append(events, fmt.Sprintf("pow20:%s", b.Id))
 		} else if ordLock := ordlock.Decode(suffix); ordLock != nil {
 			if ordLock.Seller != nil {
-				events = append(events, fmt.Sprintf("list:%s", ordLock.Seller.AddressString))
+				events = append(events, fmt.Sprintf("list:%s:%s", ordLock.Seller.AddressString, b.Id))
 			}
 			events = append(events, fmt.Sprintf("list:%s", b.Id))
 		}
-		if err := l.SaveEvents(ctx, payload.Outpoint, events, blockHeight, blockIdx); err != nil {
-			return err
+
+		// Save all events with the amount value if present
+		var value any
+		if b.Amt > 0 {
+			value = b.Amt // Keep as uint64
+		}
+
+		for _, event := range events {
+			if err := l.SaveEvent(ctx, payload.Outpoint, event, blockHeight, blockIdx, value); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

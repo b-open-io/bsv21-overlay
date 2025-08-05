@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -18,12 +17,12 @@ import (
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/beef"
+	"github.com/b-open-io/overlay/lookup/events"
 	"github.com/b-open-io/overlay/publish"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
-	"github.com/bsv-blockchain/go-sdk/overlay"
-	"github.com/bsv-blockchain/go-sdk/overlay/topic"
+	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
 	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/gofiber/fiber/v2"
@@ -84,11 +83,14 @@ func broadcastMessages(ctx context.Context) {
 			var activeClients []*bufio.Writer
 			for _, client := range clients {
 				// Try to write to the client
-				parts := strings.Split(msg.Payload, ":")
-				if len(parts) >= 2 {
-					_, err := fmt.Fprintf(client, "data: %s\n", parts[1])
+				// Message format is "score:outpoint"
+				parts := strings.SplitN(msg.Payload, ":", 2)
+				if len(parts) == 2 {
+					score := parts[0]
+					outpoint := parts[1]
+					_, err := fmt.Fprintf(client, "data: %s\n", outpoint)
 					if err == nil {
-						_, _ = fmt.Fprintf(client, "id: %s\n\n", parts[0])
+						_, _ = fmt.Fprintf(client, "id: %s\n\n", score)
 						if err := client.Flush(); err == nil {
 							activeClients = append(activeClients, client)
 						}
@@ -105,7 +107,32 @@ func broadcastMessages(ctx context.Context) {
 func main() {
 	// Create a context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+
+	// Initialize variables for cleanup
+	var store *storage.MongoStorage
+	var bsv21Lookup *lookups.Bsv21EventsLookup
+
+	// Setup cleanup function
+	cleanup := func() {
+		log.Println("Shutting down server...")
+		cancel()
+
+		// Close database connections
+		if rdb != nil {
+			rdb.Close()
+		}
+		if sub != nil {
+			sub.Close()
+		}
+
+		// Close storage and lookup services
+		if bsv21Lookup != nil {
+			bsv21Lookup.Close()
+		}
+
+		log.Println("Cleanup complete")
+	}
+	defer cleanup()
 
 	// Handle OS signals for graceful shutdown
 	signalChan := make(chan os.Signal, 1)
@@ -113,7 +140,8 @@ func main() {
 	go func() {
 		<-signalChan
 		log.Println("Received shutdown signal, cleaning up...")
-		cancel()
+		cleanup()
+		os.Exit(0)
 	}()
 
 	hostingUrl := os.Getenv("HOSTING_URL")
@@ -139,13 +167,13 @@ func main() {
 	if mongoURL == "" {
 		mongoURL = "mongodb://localhost:27017"
 	}
-	store, err := storage.NewMongoStorage(mongoURL, "mnee", beefStorage, publisher)
+	store, err = storage.NewMongoStorage(mongoURL, "mnee", beefStorage, publisher)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
 
 	// Initialize BSV21 lookup service
-	bsv21Lookup, err := lookups.NewBsv21EventsLookup(mongoURL, "mnee")
+	bsv21Lookup, err = lookups.NewBsv21EventsLookup(mongoURL, "mnee", store)
 	if err != nil {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
@@ -209,8 +237,107 @@ func main() {
 		Engine:           e,
 	})
 
+	onesat := app.Group("/1sat")
+	onesat.Get("/events/:event", func(c *fiber.Ctx) error {
+		event := c.Params("event")
+		log.Printf("Received request for BSV21 event: %s", event)
+
+		// Parse query parameters
+		fromScore := 0.0
+		limit := 100 // default limit
+
+		// Parse 'from' parameter as float64
+		if fromParam := c.Query("from"); fromParam != "" {
+			if score, err := strconv.ParseFloat(fromParam, 64); err == nil {
+				fromScore = score
+			}
+		}
+
+		// Parse 'limit' parameter
+		if limitParam := c.Query("limit"); limitParam != "" {
+			if l, err := strconv.Atoi(limitParam); err == nil && l > 0 {
+				limit = l
+				if limit > 1000 {
+					limit = 1000 // cap at 1000
+				}
+			}
+		}
+
+		// Create the lookup question
+		question := &events.Question{
+			Event: event,
+			From:  fromScore,
+			Limit: limit,
+		}
+
+		// Marshal question to JSON
+		queryBytes, err := json.Marshal(question)
+		if err != nil {
+			log.Printf("Failed to create query: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to create query",
+			})
+		}
+
+		// Create lookup question wrapper
+		lookupQuestion := &lookup.LookupQuestion{
+			Service: "ls_bsv21",
+			Query:   queryBytes,
+		}
+
+		// Call the lookup service
+		answer, err := bsv21Lookup.Lookup(c.Context(), lookupQuestion)
+		if err != nil {
+			log.Printf("Lookup error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
+		// Return the answer
+		return c.JSON(answer)
+	})
+
+	onesat.Get("/bsv21/:event/balance", func(c *fiber.Ctx) error {
+		event := c.Params("event")
+		log.Printf("Received balance request for BSV21 event: %s", event)
+
+		// Sum the values for the specified event (unspent only)
+		balance, outputs, err := bsv21Lookup.ValueSumUint64(c.Context(), event, events.SpentStatusUnspent)
+		if err != nil {
+			log.Printf("Balance calculation error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to calculate balance",
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"event":   event,
+			"balance": balance, // uint64 will be serialized correctly by JSON
+			"outputs": outputs,
+		})
+	})
+
+	// onesat.Get("/bsv21/:event/outputs", func(c *fiber.Ctx) error {
+	// 	event := c.Params("event")
+
+	// 	// Get the outputs for the specified event
+	// 	outputs, err := bsv21Lookup(c.Context(), event)
+	// 	if err != nil {
+	// 		log.Printf("Outputs retrieval error: %v", err)
+	// 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+	// 			"error": "Failed to retrieve outputs",
+	// 		})
+	// 	}
+
+	// 	return c.JSON(fiber.Map{
+	// 		"event":   event,
+	// 		"outputs": outputs,
+	// 	})
+	// })
+
 	// Add custom BSV21-specific routes
-	app.Get("/subscribe/:topics", func(c *fiber.Ctx) error {
+	onesat.Get("/subscribe/:topics", func(c *fiber.Ctx) error {
 		topics := strings.Split(c.Params("topics"), ",")
 		log.Printf("Subscription request for topics: %v", topics)
 
@@ -219,8 +346,40 @@ func main() {
 		c.Set("Connection", "keep-alive")
 		c.Set("Access-Control-Allow-Origin", "*")
 
+		// Check for Last-Event-ID header for resumption
+		lastEventID := c.Get("Last-Event-ID")
+		var fromScore float64
+		if lastEventID != "" {
+			if score, err := strconv.ParseFloat(lastEventID, 64); err == nil {
+				fromScore = score
+				log.Printf("Resuming from score: %f", fromScore)
+			}
+		}
+
 		// Create a writer for this client
 		writer := bufio.NewWriter(c.Response().BodyWriter())
+
+		// If resuming, first send any missed events
+		if fromScore > 0 {
+			// For each topic, query events since the last score
+			for _, topic := range topics {
+				question := &events.Question{
+					Event: topic,
+					From:  fromScore,
+					Limit: 100,
+				}
+
+				// Use LookupOutpoints to get outpoints with their actual scores
+				if outpoints, scores, err := bsv21Lookup.LookupOutpoints(c.Context(), question); err == nil {
+					// Send each missed event with its actual score
+					for i, outpoint := range outpoints {
+						fmt.Fprintf(writer, "data: %s\n", outpoint.String())
+						fmt.Fprintf(writer, "id: %f\n\n", scores[i])
+					}
+				}
+			}
+			writer.Flush()
+		}
 
 		// Register the client for each topic
 		topicClientsMutex.Lock()
@@ -252,51 +411,20 @@ func main() {
 		return nil
 	})
 
-	// Custom submit endpoint for backward compatibility
-	app.Post("/submit", func(c *fiber.Ctx) error {
-		topicsHeader := c.Get("x-topics", "")
-		if topicsHeader == "" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Missing x-topics header",
-			})
+	// Start the server in a goroutine
+	go func() {
+		log.Printf("Starting server on port %d...", PORT)
+		if err := app.Listen(fmt.Sprintf(":%d", PORT)); err != nil {
+			log.Printf("Server error: %v", err)
 		}
-		taggedBeef := overlay.TaggedBEEF{}
-		if err := json.Unmarshal([]byte(topicsHeader), &taggedBeef.Topics); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Invalid x-topics header",
-			})
-		}
-		taggedBeef.Beef = c.Body()
+	}()
 
-		onSteakReady := func(steak *overlay.Steak) {
-			for top, admit := range *steak {
-				if sync, ok := e.SyncConfiguration[top]; ok {
-					if sync.Type == engine.SyncConfigurationPeers && (len(admit.CoinsToRetain) > 0 || len(admit.OutputsToAdmit) > 0) {
-						for _, peer := range sync.Peers {
-							if _, err := (&topic.HTTPSOverlayBroadcastFacilitator{Client: http.DefaultClient}).Send(peer, &overlay.TaggedBEEF{
-								Beef:   taggedBeef.Beef,
-								Topics: []string{top},
-							}); err != nil {
-								log.Printf("Error submitting taggedBEEF to peer %s: %v", peer, err)
-							}
-						}
-					}
-				}
-			}
-		}
+	// Wait for context cancellation
+	<-ctx.Done()
 
-		if steak, err := e.Submit(c.Context(), taggedBeef, engine.SubmitModeCurrent, onSteakReady); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": err.Error(),
-			})
-		} else {
-			return c.JSON(steak)
-		}
-	})
-
-	// Start the server
-	log.Printf("Starting server on port %d...", PORT)
-	if err := app.Listen(fmt.Sprintf(":%d", PORT)); err != nil {
-		log.Fatalf("Server error: %v", err)
+	// Shutdown the server
+	log.Println("Shutting down HTTP server...")
+	if err := app.Shutdown(); err != nil {
+		log.Printf("Server shutdown error: %v", err)
 	}
 }

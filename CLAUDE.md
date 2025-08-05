@@ -13,13 +13,13 @@ The service consists of 4 main executables that work together:
 1. **sub.run** - JungleBus subscriber that listens for BSV-21 transactions
 2. **queue.run** - Processes incoming transactions and queues them by token ID
 3. **process.run** - Validates transactions and updates token state
-4. **bsv21-server.run** - HTTP API server providing lookup and streaming endpoints
+4. **server.run** - HTTP API server providing lookup and streaming endpoints
 
 ### Data Flow
 ```
 JungleBus → sub → Redis Queue → queue → Token Queues → process → SQLite/Redis
                                                                       ↓
-Clients ← bsv21-server ← Event Storage
+Clients ← server ← Event Storage
 ```
 
 ## Build Commands
@@ -32,7 +32,7 @@ Clients ← bsv21-server ← Event Storage
 go build -o sub.run cmd/sub/sub.go
 go build -o queue.run cmd/queue/queue.go
 go build -o process.run cmd/process/process.go
-go build -o bsv21-server.run cmd/bsv21-server/bsv21-server.go
+go build -o server.run cmd/server/server.go
 
 # Run tests
 go test ./...
@@ -55,7 +55,7 @@ Services should be started in this order:
 ./process.run
 
 # 4. Start API server
-./bsv21-server.run
+./server.run
 ```
 
 ## Configuration

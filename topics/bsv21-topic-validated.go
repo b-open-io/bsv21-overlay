@@ -3,8 +3,9 @@ package topics
 import (
 	"context"
 
-	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
+	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
+	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 )
@@ -45,7 +46,6 @@ type tokenSummary struct {
 }
 
 func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Context, beefBytes []byte, previousCoins map[uint32]*transaction.TransactionOutput) (admit overlay.AdmittanceInstructions, err error) {
-	var tx *transaction.Transaction
 	_, tx, txid, err := transaction.ParseBeef(beefBytes)
 	if err != nil {
 		return admit, err
@@ -54,17 +54,22 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 	}
 
 	summary := make(map[string]*tokenSummary)
+	relevantTokenIds := make(map[string]struct{})
+
+	// First pass: identify all relevant token IDs in outputs
 	for vout, output := range tx.Outputs {
 		if b := bsv21.Decode(output.LockingScript); b != nil {
 			if b.Op == string(bsv21.OpMint) {
 				b.Id = (&transaction.Outpoint{
-					Txid:        *txid,
+					Txid:  *txid,
 					Index: uint32(vout),
 				}).OrdinalString()
 			}
 			if !tm.HasTokenId(b.Id) {
 				continue
 			}
+			relevantTokenIds[b.Id] = struct{}{}
+
 			if b.Op == string(bsv21.OpMint) {
 				admit.OutputsToAdmit = append(admit.OutputsToAdmit, uint32(vout))
 				continue
@@ -83,13 +88,18 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 	}
 
 	if len(summary) > 0 {
-		for vin, txin := range tx.Inputs {
-			if txout, ok := previousCoins[uint32(vin)]; ok {
-				outpoint := &transaction.Outpoint{
-					Txid:        *txin.SourceTXID,
-					Index: txin.SourceTxOutIndex,
-				}
+		var missingDependencies []*transaction.Outpoint
+		ancillaryTxids := make(map[chainhash.Hash]struct{})
 
+		// Single loop to process inputs and detect missing dependencies
+		for vin, txin := range tx.Inputs {
+			outpoint := &transaction.Outpoint{
+				Txid:  *txin.SourceTXID,
+				Index: txin.SourceTxOutIndex,
+			}
+
+			if txout, ok := previousCoins[uint32(vin)]; ok {
+				// We have this input - process it
 				if b := bsv21.Decode(txout.LockingScript); b != nil {
 					if b.Op == string(bsv21.OpMint) {
 						b.Id = outpoint.OrdinalString()
@@ -98,18 +108,56 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 						continue
 					}
 					admit.CoinsToRetain = append(admit.CoinsToRetain, uint32(vin))
-					if token, ok := summary[b.Id]; !ok {
-						continue
-					} else {
+					if token, ok := summary[b.Id]; ok {
 						token.tokensIn += b.Amt
+					}
+
+					// If this input transaction is also in the BEEF, add to ancillary
+					if txin.SourceTransaction != nil {
+						ancillaryTxids[*txin.SourceTXID] = struct{}{}
+					}
+				}
+			} else {
+				// Missing input - check if it's a dependency we care about
+				if txin.SourceTransaction != nil {
+					if sourceOutput := txin.SourceTxOutput(); sourceOutput != nil {
+						if b := bsv21.Decode(sourceOutput.LockingScript); b != nil {
+							if b.Op == string(bsv21.OpMint) {
+								b.Id = outpoint.OrdinalString()
+							}
+							if tm.HasTokenId(b.Id) {
+								// This is a BSV21 token we care about
+								// Since it's in the BEEF, add its txid to ancillary
+								ancillaryTxids[*txin.SourceTXID] = struct{}{}
+
+								// But we don't have it in previousCoins, so it's a missing dependency
+								missingDependencies = append(missingDependencies, outpoint)
+							}
+						}
 					}
 				}
 			}
-
 		}
+
+		// If we have missing dependencies, return error
+		if len(missingDependencies) > 0 {
+			return admit, &engine.ErrMissingDependencies{
+				MissingOutpoints: missingDependencies,
+			}
+		}
+
 		for _, token := range summary {
 			if token.tokensIn >= token.tokensOut {
 				admit.OutputsToAdmit = append(admit.OutputsToAdmit, token.vouts...)
+			}
+		}
+
+		// Add ancillary txids if any
+		if len(ancillaryTxids) > 0 {
+			admit.AncillaryTxids = make([]*chainhash.Hash, 0, len(ancillaryTxids))
+			for txidHash := range ancillaryTxids {
+				hash := txidHash
+				admit.AncillaryTxids = append(admit.AncillaryTxids, &hash)
 			}
 		}
 	}
@@ -142,7 +190,7 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyNeededInputs(ctx context.Context, 
 	for _, txin := range tx.Inputs {
 		if inTx := beef.FindTransaction(txin.SourceTXID.String()); inTx != nil {
 			outpoint := &transaction.Outpoint{
-				Txid:        *txin.SourceTXID,
+				Txid:  *txin.SourceTXID,
 				Index: txin.SourceTxOutIndex,
 			}
 			script := inTx.Outputs[txin.SourceTxOutIndex].LockingScript
