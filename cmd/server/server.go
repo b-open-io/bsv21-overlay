@@ -194,19 +194,21 @@ func main() {
 		ChainTracker: chaintracker,
 	}
 
-	// Load topic managers dynamically from Redis
-	if tms, err := rdb.SMembers(ctx, "topics").Result(); err != nil {
-		log.Fatalf("Failed to get topics from Redis: %v", err)
+	// Load topic managers dynamically from Redis whitelist
+	const whitelistKey = "bsv21:whitelist"
+	if tokens, err := rdb.SMembers(ctx, whitelistKey).Result(); err != nil {
+		log.Fatalf("Failed to get whitelisted tokens from Redis: %v", err)
 	} else {
-		for _, top := range tms {
-			log.Println("Adding topic manager:", top)
-			tokenId := top[3:] // Remove "tm_" prefix
-			e.Managers[top] = topics.NewBsv21ValidatedTopicManager(
-				top,
+		log.Printf("Loading whitelisted tokens: %v", tokens)
+		for _, tokenId := range tokens {
+			topicName := "tm_" + tokenId
+			log.Println("Adding topic manager:", topicName)
+			e.Managers[topicName] = topics.NewBsv21ValidatedTopicManager(
+				topicName,
 				store,
 				[]string{tokenId},
 			)
-			e.SyncConfiguration[top] = engine.SyncConfiguration{
+			e.SyncConfiguration[topicName] = engine.SyncConfiguration{
 				Type:  engine.SyncConfigurationPeers,
 				Peers: peers,
 			}
