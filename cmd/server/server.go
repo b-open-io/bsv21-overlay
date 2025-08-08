@@ -229,14 +229,16 @@ func main() {
 	go broadcastMessages(ctx)
 
 	// Create a new Fiber app
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		EnablePrintRoutes: true, // Set this to true to print routes
+	})
 	app.Use(logger.New())
 
 	// Setup Swagger documentation
 	setupSwagger(app)
 
 	// Register overlay service routes using server pattern
-	server.RegisterRoutesWithErrorHandler(app, &server.RegisterRoutesConfig{
+	server.RegisterRoutes(app, &server.RegisterRoutesConfig{
 		ARCAPIKey:        os.Getenv("ARC_API_KEY"),
 		ARCCallbackToken: os.Getenv("ARC_CALLBACK_TOKEN"),
 		Engine:           e,

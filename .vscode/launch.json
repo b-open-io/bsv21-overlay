@@ -17,17 +17,16 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "cmd/server/server.go",
+            "program": "${workspaceFolder}/cmd/server",
             "cwd": "${workspaceFolder}",
             "env": {
                 "BLOCK_HEADERS_URL": "http://localhost:8080",
-                "REDIS": "redis://localhost:6666",
-                "JUNGLEBUS":"https://texas1.junglebus.gorillapool.io",
-                "PEERS":"https://bsv21.overlay.gorillapool.io,http://shack:8081",
-                "HOSTING_URL": "http://rack:8081"
+                "REDIS_URL": "redis://localhost:6380",
+                "REDIS_BEEF": "redis://localhost:6666",
+                "MONGO_URL": "mongodb://mongo:mongo@localhost:27017",
             },
             "args": [
-                "-p=8081",
+                "-p=8000",
                 "-s=true"
             ]
         },
@@ -36,16 +35,16 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "cmd/server/server.go",
+            "program": "${workspaceFolder}/cmd/server",
             "cwd": "${workspaceFolder}",
             "env": {
                 "BLOCK_HEADERS_URL": "http://localhost:8080",
-                "REDIS": "redis://localhost:6666",
-                "JUNGLEBUS":"https://texas1.junglebus.gorillapool.io",
-                "HOSTING_URL": "http://rack:8081"
+                "REDIS_URL": "redis://localhost:6380",
+                "REDIS_BEEF": "redis://localhost:6666",
+                "MONGO_URL": "mongodb://mongo:mongo@localhost:27017",
             },
             "args": [
-                "-p=8081"
+                "-p=8000"
             ]
         }
     ]
