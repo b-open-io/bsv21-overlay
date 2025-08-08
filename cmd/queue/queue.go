@@ -28,7 +28,7 @@ func init() {
 	// Set up BEEF storage
 	redisBeefURL := os.Getenv("REDIS_BEEF")
 	if redisBeefURL == "" {
-		redisBeefURL = os.Getenv("REDIS")
+		redisBeefURL = os.Getenv("REDIS_URL")
 	}
 	var err error
 	beefStorage, err = beef.NewRedisBeefStorage(redisBeefURL, 0)
@@ -62,8 +62,8 @@ func main() {
 	}()
 
 	var rdb *redis.Client
-	log.Println("Connecting to Redis", os.Getenv("REDIS"))
-	if opts, err := redis.ParseURL(os.Getenv("REDIS")); err != nil {
+	log.Println("Connecting to Redis", os.Getenv("REDIS_URL"))
+	if opts, err := redis.ParseURL(os.Getenv("REDIS_URL")); err != nil {
 		log.Fatalf("Failed to parse Redis URL: %v", err)
 	} else {
 		rdb = redis.NewClient(opts)

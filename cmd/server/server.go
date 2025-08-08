@@ -51,7 +51,7 @@ func init() {
 	if PORT == 0 {
 		PORT = 3000
 	}
-	if redisOpts, err := redis.ParseURL(os.Getenv("REDIS")); err != nil {
+	if redisOpts, err := redis.ParseURL(os.Getenv("REDIS_URL")); err != nil {
 		log.Fatalf("Failed to parse Redis URL: %v", err)
 	} else {
 		rdb = redis.NewClient(redisOpts)
@@ -148,7 +148,7 @@ func main() {
 	// Initialize BEEF storage
 	redisBeefURL := os.Getenv("REDIS_BEEF")
 	if redisBeefURL == "" {
-		redisBeefURL = os.Getenv("REDIS")
+		redisBeefURL = os.Getenv("REDIS_URL")
 	}
 	beefStorage, err := beef.NewRedisBeefStorage(redisBeefURL, 0)
 	if err != nil {
@@ -156,7 +156,7 @@ func main() {
 	}
 
 	// Initialize publisher
-	publisher, err := publish.NewRedisPublish(os.Getenv("REDIS"))
+	publisher, err := publish.NewRedisPublish(os.Getenv("REDIS_URL"))
 	if err != nil {
 		log.Fatalf("Failed to create publisher: %v", err)
 	}

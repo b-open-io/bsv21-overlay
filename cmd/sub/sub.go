@@ -46,7 +46,7 @@ func main() {
 	)
 
 	// Set up Redis connection
-	redisURL := os.Getenv("REDIS")
+	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
 		redisURL = "redis://localhost:6379"
 	}

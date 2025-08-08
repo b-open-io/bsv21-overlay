@@ -41,7 +41,7 @@ func init() {
 	// Set up BEEF storage
 	redisBeefURL := os.Getenv("REDIS_BEEF")
 	if redisBeefURL == "" {
-		redisBeefURL = os.Getenv("REDIS")
+		redisBeefURL = os.Getenv("REDIS_URL")
 	}
 	var err error
 	beefStorage, err = beef.NewRedisBeefStorage(redisBeefURL, 0)
@@ -50,7 +50,7 @@ func init() {
 	}
 
 	// Set up publisher
-	publisher, err = publish.NewRedisPublish(os.Getenv("REDIS"))
+	publisher, err = publish.NewRedisPublish(os.Getenv("REDIS_URL"))
 	if err != nil {
 		log.Fatalf("Failed to create publisher: %v", err)
 	}
@@ -86,8 +86,8 @@ func main() {
 	}()
 
 	var rdb *redis.Client
-	log.Println("Connecting to Redis", os.Getenv("REDIS"))
-	if opts, err := redis.ParseURL(os.Getenv("REDIS")); err != nil {
+	log.Println("Connecting to Redis", os.Getenv("REDIS_URL"))
+	if opts, err := redis.ParseURL(os.Getenv("REDIS_URL")); err != nil {
 		log.Fatalf("Failed to parse Redis URL: %v", err)
 	} else {
 		rdb = redis.NewClient(opts)
@@ -99,24 +99,24 @@ func main() {
 			}
 		}
 	}()
-	
+
 	// Define whitelist key
 	const whitelistKey = "bsv21:whitelist"
-	
+
 	// Log current whitelist
 	if tokens, err := rdb.SMembers(ctx, whitelistKey).Result(); err == nil {
 		log.Printf("Token whitelist: %v", tokens)
 	} else {
 		log.Printf("Failed to get token whitelist: %v", err)
 	}
-	
+
 	// Storage is already initialized in init()
 	// Cast store to EventDataStorage for the lookup
 	eventStorage, ok := store.(storage.EventDataStorage)
 	if !ok {
 		log.Fatalf("Storage does not implement EventDataStorage interface")
 	}
-	
+
 	bsv21Lookup, err := lookups.NewBsv21EventsLookup(eventStorage)
 	if err != nil {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
@@ -160,7 +160,7 @@ func main() {
 			return
 		default:
 		}
-		
+
 		// Get whitelisted tokens
 		whitelistedTokens, err := rdb.SMembers(ctx, whitelistKey).Result()
 		if err != nil {
@@ -168,14 +168,14 @@ func main() {
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		
+
 		hasRows := false
 		var wg sync.WaitGroup
-		
+
 		// Process each whitelisted token
 		for _, tokenId := range whitelistedTokens {
 			key := "tok:" + tokenId
-			
+
 			// Check if this token has any transactions to process
 			exists, err := rdb.Exists(ctx, key).Result()
 			if err != nil {
@@ -186,7 +186,7 @@ func main() {
 				// No transactions for this token
 				continue
 			}
-			
+
 			hasRows = true
 			select {
 			case <-ctx.Done():
@@ -201,7 +201,7 @@ func main() {
 						wg.Done()
 						<-limiter
 					}()
-					
+
 					// log.Println("Processing key:", tokenId)
 
 					tm := "tm_" + tokenId
