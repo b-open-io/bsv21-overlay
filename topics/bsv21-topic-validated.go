@@ -88,10 +88,9 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 	}
 
 	if len(summary) > 0 {
-		var missingDependencies []*transaction.Outpoint
 		ancillaryTxids := make(map[chainhash.Hash]struct{})
 
-		// Single loop to process inputs and detect missing dependencies
+		// Single loop to process inputs and detect missing Inputs
 		for vin, txin := range tx.Inputs {
 			outpoint := &transaction.Outpoint{
 				Txid:  *txin.SourceTXID,
@@ -112,37 +111,20 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 						token.tokensIn += b.Amt
 					}
 
-					// If this input transaction is also in the BEEF, add to ancillary
-					if txin.SourceTransaction != nil {
-						ancillaryTxids[*txin.SourceTXID] = struct{}{}
-					}
+					ancillaryTxids[*txin.SourceTXID] = struct{}{}
 				}
 			} else {
 				// Missing input - check if it's a dependency we care about
-				if txin.SourceTransaction != nil {
-					if sourceOutput := txin.SourceTxOutput(); sourceOutput != nil {
-						if b := bsv21.Decode(sourceOutput.LockingScript); b != nil {
-							if b.Op == string(bsv21.OpMint) {
-								b.Id = outpoint.OrdinalString()
-							}
-							if tm.HasTokenId(b.Id) {
-								// This is a BSV21 token we care about
-								// Since it's in the BEEF, add its txid to ancillary
-								ancillaryTxids[*txin.SourceTXID] = struct{}{}
-
-								// But we don't have it in previousCoins, so it's a missing dependency
-								missingDependencies = append(missingDependencies, outpoint)
-							}
+				if sourceOutput := txin.SourceTxOutput(); sourceOutput != nil {
+					if b := bsv21.Decode(sourceOutput.LockingScript); b != nil {
+						if b.Op == string(bsv21.OpMint) {
+							b.Id = outpoint.OrdinalString()
+						}
+						if tm.HasTokenId(b.Id) {
+							return admit, engine.ErrMissingInput
 						}
 					}
 				}
-			}
-		}
-
-		// If we have missing dependencies, return error
-		if len(missingDependencies) > 0 {
-			return admit, &engine.ErrMissingDependencies{
-				MissingOutpoints: missingDependencies,
 			}
 		}
 
@@ -156,7 +138,7 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 		if len(ancillaryTxids) > 0 {
 			admit.AncillaryTxids = make([]*chainhash.Hash, 0, len(ancillaryTxids))
 			for txidHash := range ancillaryTxids {
-				hash := txidHash
+				hash := txidHash // Must copy - loop variable is reused
 				admit.AncillaryTxids = append(admit.AncillaryTxids, &hash)
 			}
 		}

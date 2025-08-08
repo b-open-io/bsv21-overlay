@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -17,12 +16,11 @@ import (
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/beef"
-	"github.com/b-open-io/overlay/lookup/events"
 	"github.com/b-open-io/overlay/publish"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
-	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
+	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/gofiber/fiber/v2"
@@ -109,7 +107,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize variables for cleanup
-	var store *storage.MongoStorage
+	var store storage.EventDataStorage
 	var bsv21Lookup *lookups.Bsv21EventsLookup
 
 	// Setup cleanup function
@@ -126,9 +124,10 @@ func main() {
 		}
 
 		// Close storage and lookup services
-		if bsv21Lookup != nil {
-			bsv21Lookup.Close()
-		}
+		// Note: EventDataStorage interface doesn't define Close()
+		// Individual implementations (Redis, SQLite) may have Close methods
+		// but we can't call them through the interface
+		// BSV21 lookup doesn't need closing - storage is closed separately
 
 		log.Println("Cleanup complete")
 	}
@@ -163,17 +162,18 @@ func main() {
 	}
 
 	// Initialize storage
-	mongoURL := os.Getenv("MONGO_URL")
-	if mongoURL == "" {
-		mongoURL = "mongodb://localhost:27017"
+	// Initialize storage - using MongoDB
+	mongoConnString := os.Getenv("MONGO_URL")
+	if mongoConnString == "" {
+		mongoConnString = "mongodb://localhost:27017"
 	}
-	store, err = storage.NewMongoStorage(mongoURL, "mnee", beefStorage, publisher)
+	store, err = storage.NewMongoEventDataStorage(mongoConnString, "bsv21", beefStorage, publisher)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
 
 	// Initialize BSV21 lookup service
-	bsv21Lookup, err = lookups.NewBsv21EventsLookup(mongoURL, "mnee", store)
+	bsv21Lookup, err = lookups.NewBsv21EventsLookup(store)
 	if err != nil {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
@@ -230,6 +230,9 @@ func main() {
 	app := fiber.New()
 	app.Use(logger.New())
 
+	// Setup Swagger documentation
+	setupSwagger(app)
+
 	// Register overlay service routes using server pattern
 	server.RegisterRoutesWithErrorHandler(app, &server.RegisterRoutesConfig{
 		ARCAPIKey:        os.Getenv("ARC_API_KEY"),
@@ -238,10 +241,9 @@ func main() {
 	})
 
 	onesat := app.Group("/1sat")
-	onesat.Get("/events/:event", func(c *fiber.Ctx) error {
-		event := c.Params("event")
-		log.Printf("Received request for BSV21 event: %s", event)
 
+	// Common handler for parsing event query parameters
+	parseEventQuery := func(c *fiber.Ctx) *storage.EventQuestion {
 		// Parse query parameters
 		fromScore := 0.0
 		limit := 100 // default limit
@@ -263,78 +265,272 @@ func main() {
 			}
 		}
 
-		// Create the lookup question
-		question := &events.Question{
-			Event: event,
+		return &storage.EventQuestion{
+			Event: c.Params("event"),
 			From:  fromScore,
 			Limit: limit,
 		}
+	}
 
-		// Marshal question to JSON
-		queryBytes, err := json.Marshal(question)
-		if err != nil {
-			log.Printf("Failed to create query: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to create query",
-			})
-		}
+	// Route for all events
+	onesat.Get("/events/:event", func(c *fiber.Ctx) error {
+		event := c.Params("event")
+		log.Printf("Received request for all BSV21 events: %s", event)
 
-		// Create lookup question wrapper
-		lookupQuestion := &lookup.LookupQuestion{
-			Service: "ls_bsv21",
-			Query:   queryBytes,
-		}
-
-		// Call the lookup service
-		answer, err := bsv21Lookup.Lookup(c.Context(), lookupQuestion)
+		// Build question and call storage directly
+		question := parseEventQuery(c)
+		results, err := store.LookupOutpoints(c.Context(), question, true) // include data
 		if err != nil {
 			log.Printf("Lookup error: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": err.Error(),
+				"message": err.Error(),
 			})
 		}
 
-		// Return the answer
-		return c.JSON(answer)
+		return c.JSON(results)
 	})
 
-	onesat.Get("/bsv21/:event/balance", func(c *fiber.Ctx) error {
+	// Route for unspent events only
+	onesat.Get("/events/:event/unspent", func(c *fiber.Ctx) error {
 		event := c.Params("event")
-		log.Printf("Received balance request for BSV21 event: %s", event)
+		log.Printf("Received request for unspent BSV21 events: %s", event)
 
-		// Sum the values for the specified event (unspent only)
-		balance, outputs, err := bsv21Lookup.ValueSumUint64(c.Context(), event, events.SpentStatusUnspent)
+		// Build question and call storage directly
+		question := parseEventQuery(c)
+		question.UnspentOnly = true
+		results, err := store.LookupOutpoints(c.Context(), question, true) // include data
+		if err != nil {
+			log.Printf("Lookup error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": err.Error(),
+			})
+		}
+
+		return c.JSON(results)
+	})
+
+	onesat.Get("/bsv21/:tokenId", func(c *fiber.Ctx) error {
+		tokenIdStr := c.Params("tokenId")
+		log.Printf("Received request for BSV21 token details: %s", tokenIdStr)
+
+		// Parse the tokenId string into an outpoint
+		outpoint, err := transaction.OutpointFromString(tokenIdStr)
+		if err != nil {
+			log.Printf("Invalid token ID format: %v", err)
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Invalid token ID format",
+			})
+		}
+
+		// Use the dedicated GetToken method
+		tokenData, err := bsv21Lookup.GetToken(c.Context(), outpoint)
+		if err != nil {
+			log.Printf("GetToken error: %v", err)
+
+			// Determine appropriate status code based on error
+			if err.Error() == "token not found" {
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+					"message": "Token not found",
+				})
+			} else if strings.Contains(err.Error(), "not a mint transaction") {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"message": err.Error(),
+				})
+			}
+
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to retrieve token details",
+			})
+		}
+
+		return c.JSON(tokenData)
+	})
+
+	onesat.Get("/bsv21/:tokenId/block/:height", func(c *fiber.Ctx) error {
+		tokenId := c.Params("tokenId")
+		heightStr := c.Params("height")
+
+		log.Printf("Received block request for BSV21 tokenId: %s at height: %s", tokenId, heightStr)
+
+		// Parse height as uint32
+		height64, err := strconv.ParseUint(heightStr, 10, 32)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Invalid height parameter",
+			})
+		}
+		height := uint32(height64)
+
+		// Get transactions from storage for the specific token's topic at this height
+		// Use the topic manager ID format: tm_<tokenId>
+		topic := "tm_" + tokenId
+		transactions, err := store.GetTransactionsByTopicAndHeight(c.Context(), topic, height)
+		if err != nil {
+			log.Printf("GetBlockData error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to get block data",
+			})
+		}
+
+		// Fetch block header information from chaintracker
+		blockHeader, err := chaintracker.BlockByHeight(c.Context(), height)
+		if err != nil {
+			log.Printf("Failed to get block header: %v", err)
+			// Continue without header info rather than failing completely
+			return c.JSON(fiber.Map{
+				"block": fiber.Map{
+					"height":            height,
+					"hash":              "",
+					"previousblockhash": "",
+				},
+				"transactions": transactions,
+			})
+		}
+
+		// Build response with header and transactions
+		response := fiber.Map{
+			"block": fiber.Map{
+				"height":            height,
+				"hash":              blockHeader.Hash.String(),
+				"previousblockhash": blockHeader.PreviousBlock.String(),
+				"timestamp":         blockHeader.Timestamp,
+			},
+			"transactions": transactions,
+		}
+
+		return c.JSON(response)
+	})
+
+	onesat.Get("/bsv21/:tokenId/:lockType/:address/balance", func(c *fiber.Ctx) error {
+		tokenId := c.Params("tokenId")
+		lockType := c.Params("lockType")
+		address := c.Params("address")
+
+		// Build event string from lockType, address, and tokenId
+		event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+		log.Printf("Received balance request for token %s, %s address %s", tokenId, lockType, address)
+
+		// Get balance for the single event
+		balance, outputs, err := bsv21Lookup.GetBalance(c.Context(), []string{event})
 		if err != nil {
 			log.Printf("Balance calculation error: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to calculate balance",
+				"message": "Failed to calculate balance",
 			})
 		}
 
 		return c.JSON(fiber.Map{
-			"event":   event,
-			"balance": balance, // uint64 will be serialized correctly by JSON
-			"outputs": outputs,
+			"balance":   balance, // uint64 will be serialized correctly by JSON
+			"utxoCount": outputs,
 		})
 	})
 
-	// onesat.Get("/bsv21/:event/outputs", func(c *fiber.Ctx) error {
-	// 	event := c.Params("event")
+	// POST endpoint for multiple address balance queries
+	onesat.Post("/bsv21/:tokenId/:lockType/balance", func(c *fiber.Ctx) error {
+		tokenId := c.Params("tokenId")
+		lockType := c.Params("lockType")
 
-	// 	// Get the outputs for the specified event
-	// 	outputs, err := bsv21Lookup(c.Context(), event)
-	// 	if err != nil {
-	// 		log.Printf("Outputs retrieval error: %v", err)
-	// 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-	// 			"error": "Failed to retrieve outputs",
-	// 		})
-	// 	}
+		// Parse the request body - accept array of addresses directly
+		var addresses []string
+		if err := c.BodyParser(&addresses); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Invalid request body",
+			})
+		}
 
-	// 	return c.JSON(fiber.Map{
-	// 		"event":   event,
-	// 		"outputs": outputs,
-	// 	})
-	// })
+		if len(addresses) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "No addresses provided",
+			})
+		}
+
+		// Limit the number of addresses to prevent abuse
+		if len(addresses) > 100 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Too many addresses (max 100)",
+			})
+		}
+
+		log.Printf("Received multi-balance request for token %s, %s for %d addresses", tokenId, lockType, len(addresses))
+
+		// Build event strings for all addresses
+		events := make([]string, 0, len(addresses))
+		for _, address := range addresses {
+			event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+			events = append(events, event)
+		}
+
+		// Get total balance for all addresses combined
+		balance, utxoCount, err := bsv21Lookup.GetBalance(c.Context(), events)
+		if err != nil {
+			log.Printf("Balance calculation error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to calculate balances",
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"balance":   balance,
+			"utxoCount": utxoCount,
+		})
+	})
+
+	onesat.Get("/block/tip", func(c *fiber.Ctx) error {
+		// Get current block tip from chaintracker
+		tip, err := chaintracker.GetChaintip(c.Context())
+		if err != nil {
+			log.Printf("Failed to get block tip: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to get current block tip",
+			})
+		}
+
+		// Return header with height and properly formatted hash strings
+		return c.JSON(fiber.Map{
+			"height":            tip.Height,
+			"hash":              tip.Header.Hash.String(),
+			"version":           tip.Header.Version,
+			"prevBlockHash":     tip.Header.PreviousBlock.String(),
+			"merkleRoot":        tip.Header.MerkleRoot.String(),
+			"creationTimestamp": tip.Header.Timestamp,
+			"difficultyTarget":  tip.Header.Bits,
+			"nonce":             tip.Header.Nonce,
+		})
+	})
+
+	onesat.Get("/block/:height", func(c *fiber.Ctx) error {
+		heightStr := c.Params("height")
+
+		// Parse height as uint32
+		height64, err := strconv.ParseUint(heightStr, 10, 32)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Invalid height parameter",
+			})
+		}
+		height := uint32(height64)
+
+		// Get block header by height
+		blockHeader, err := chaintracker.BlockByHeight(c.Context(), height)
+		if err != nil {
+			log.Printf("Failed to get block header for height %d: %v", height, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to get block header",
+			})
+		}
+
+		// Return header with height and properly formatted hash strings
+		return c.JSON(fiber.Map{
+			"height":            height,
+			"hash":              blockHeader.Hash.String(),
+			"version":           blockHeader.Version,
+			"prevBlockHash":     blockHeader.PreviousBlock.String(),
+			"merkleRoot":        blockHeader.MerkleRoot.String(),
+			"creationTimestamp": blockHeader.Timestamp,
+			"difficultyTarget":  blockHeader.Bits,
+			"nonce":             blockHeader.Nonce,
+		})
+	})
 
 	// Add custom BSV21-specific routes
 	onesat.Get("/subscribe/:topics", func(c *fiber.Ctx) error {
@@ -363,18 +559,18 @@ func main() {
 		if fromScore > 0 {
 			// For each topic, query events since the last score
 			for _, topic := range topics {
-				question := &events.Question{
+				question := &storage.EventQuestion{
 					Event: topic,
 					From:  fromScore,
 					Limit: 100,
 				}
 
-				// Use LookupOutpoints to get outpoints with their actual scores
-				if outpoints, scores, err := bsv21Lookup.LookupOutpoints(c.Context(), question); err == nil {
+				// Use storage directly to get outpoints with their actual scores
+				if results, err := store.LookupOutpoints(c.Context(), question, false); err == nil {
 					// Send each missed event with its actual score
-					for i, outpoint := range outpoints {
-						fmt.Fprintf(writer, "data: %s\n", outpoint.String())
-						fmt.Fprintf(writer, "id: %f\n\n", scores[i])
+					for _, result := range results {
+						fmt.Fprintf(writer, "data: %s\n", result.Outpoint.String())
+						fmt.Fprintf(writer, "id: %f\n\n", result.Score)
 					}
 				}
 			}

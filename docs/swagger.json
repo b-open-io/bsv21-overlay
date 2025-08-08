@@ -1,0 +1,611 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "Error response returned by the API",
+        "title": "BSV21 Overlay API",
+        "termsOfService": "http://swagger.io/terms/",
+        "contact": {
+            "name": "API Support",
+            "url": "http://www.swagger.io/support",
+            "email": "support@swagger.io"
+        },
+        "license": {
+            "name": "Apache 2.0",
+            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+        },
+        "version": "1.0"
+    },
+    "host": "localhost:3000",
+    "basePath": "/",
+    "paths": {
+        "/1sat/block/tip": {
+            "get": {
+                "description": "Get the current blockchain tip with full header information",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "1sat-blocks"
+                ],
+                "summary": "Get current block tip",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.BlockHeaderResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/1sat/block/{height}": {
+            "get": {
+                "description": "Get block header information for a specific height",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "1sat-blocks"
+                ],
+                "summary": "Get block by height",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Block height",
+                        "name": "height",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.BlockHeaderResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/1sat/bsv21/{tokenId}/block/{height}": {
+            "get": {
+                "description": "Get all BSV21 transactions for a specific token at a given block height",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "1sat-bsv21"
+                ],
+                "summary": "Get BSV21 transactions for a block",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token ID (ordinal format: txid_vout)",
+                        "name": "tokenId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Block height",
+                        "name": "height",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.BSV21BlockDataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/1sat/bsv21/{tokenId}/{lockType}/{address}/balance": {
+            "get": {
+                "description": "Get the balance of a BSV21 token for a specific address",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "1sat-bsv21"
+                ],
+                "summary": "Get BSV21 token balance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token ID (ordinal format: txid_vout)",
+                        "name": "tokenId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lock type (p2pkh, cos, ltm, pow20, etc.)",
+                        "name": "lockType",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bitcoin address",
+                        "name": "address",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.BSV21BalanceResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/1sat/events/{event}": {
+            "get": {
+                "description": "Retrieve all overlay events (both spent and unspent) for a specific event pattern",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "1sat-events"
+                ],
+                "summary": "Get all overlay events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Event pattern: id:tokenId, sym:SYMBOL, p2pkh:address:tokenId, cos:address:tokenId, ltm:tokenId, pow20:tokenId, list:address",
+                        "name": "event",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "number",
+                        "description": "Starting score (for pagination)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum number of results (default 100, max 1000)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/cmd_server.BSV21EventResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/1sat/events/{event}/unspent": {
+            "get": {
+                "description": "Retrieve only unspent overlay events for a specific event pattern",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "1sat-events"
+                ],
+                "summary": "Get unspent overlay events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Event pattern: id:tokenId, sym:SYMBOL, p2pkh:address:tokenId, cos:address:tokenId, ltm:tokenId, pow20:tokenId, list:address",
+                        "name": "event",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "number",
+                        "description": "Starting score (for pagination)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum number of results (default 100, max 1000)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/cmd_server.BSV21EventResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/1sat/subscribe/{topics}": {
+            "get": {
+                "description": "Server-Sent Events (SSE) stream for real-time BSV21 events",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "1sat-events"
+                ],
+                "summary": "Subscribe to BSV21 events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Comma-separated list of topics to subscribe to",
+                        "name": "topics",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resume from this event ID (score)",
+                        "name": "Last-Event-ID",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/arc-ingest": {
+            "post": {
+                "description": "Webhook endpoint for ARC transaction status updates",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "ARC webhook for transaction status",
+                "parameters": [
+                    {
+                        "description": "Transaction status update from ARC",
+                        "name": "status",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/lookup": {
+            "post": {
+                "description": "Query overlay events with complex filters via POST",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "overlay"
+                ],
+                "summary": "Query overlay events",
+                "parameters": [
+                    {
+                        "description": "Lookup query with event filters",
+                        "name": "query",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/cmd_server.BSV21EventResponse"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/submit": {
+            "post": {
+                "description": "Submit a tagged BEEF transaction for processing by the overlay",
+                "consumes": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "overlay"
+                ],
+                "summary": "Submit tagged BEEF transaction",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Comma-separated list of topics",
+                        "name": "x-topics",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "BEEF transaction data (binary)",
+                        "name": "beef",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "cmd_server.BSV21BalanceResponse": {
+            "description": "BSV21 token balance for an address",
+            "type": "object",
+            "properties": {
+                "balance": {
+                    "type": "integer",
+                    "example": 1000000
+                },
+                "utxoCount": {
+                    "type": "integer",
+                    "example": 5
+                }
+            }
+        },
+        "cmd_server.BSV21BlockDataResponse": {
+            "description": "BSV21 transactions for a specific block",
+            "type": "object",
+            "properties": {
+                "block": {
+                    "$ref": "#/definitions/cmd_server.BlockHeaderResponse"
+                },
+                "transactions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                }
+            }
+        },
+        "cmd_server.BSV21EventResponse": {
+            "description": "BSV21 event data",
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "outpoint": {
+                    "type": "string",
+                    "example": "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"
+                },
+                "score": {
+                    "type": "number",
+                    "example": 902578.000001234
+                }
+            }
+        },
+        "cmd_server.BlockHeaderResponse": {
+            "description": "Bitcoin block header information",
+            "type": "object",
+            "properties": {
+                "creationTimestamp": {
+                    "type": "integer",
+                    "example": 1699564800
+                },
+                "difficultyTarget": {
+                    "type": "integer",
+                    "example": 403014710
+                },
+                "hash": {
+                    "type": "string",
+                    "example": "000000000000000000034b7f5e7e5e5a5b5c5d5e5f5g5h5i5j5k5l5m5n5o5p"
+                },
+                "height": {
+                    "type": "integer",
+                    "example": 902578
+                },
+                "merkleRoot": {
+                    "type": "string",
+                    "example": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                },
+                "nonce": {
+                    "type": "integer",
+                    "example": 1234567890
+                },
+                "prevBlockHash": {
+                    "type": "string",
+                    "example": "000000000000000000012a3b4c5d6e7f8g9h0i1j2k3l4m5n6o7p8q9r0s1t2u3"
+                },
+                "version": {
+                    "type": "integer",
+                    "example": 536870912
+                }
+            }
+        },
+        "cmd_server.ErrorResponse": {
+            "description": "Error response returned by the API",
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "example": "Invalid token ID format"
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "description": "BSV21 token-specific operations under the 1sat namespace",
+            "name": "1sat-bsv21"
+        },
+        {
+            "description": "Blockchain block operations under the 1sat namespace",
+            "name": "1sat-blocks"
+        },
+        {
+            "description": "Event querying and streaming under the 1sat namespace",
+            "name": "1sat-events"
+        },
+        {
+            "description": "Core overlay service operations",
+            "name": "overlay"
+        },
+        {
+            "description": "Webhook endpoints for external integrations",
+            "name": "webhooks"
+        }
+    ]
+}

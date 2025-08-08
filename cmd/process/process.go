@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -56,12 +55,12 @@ func init() {
 		log.Fatalf("Failed to create publisher: %v", err)
 	}
 
-	// Set up storage
-	mongoURL := os.Getenv("MONGO_URL")
-	if mongoURL == "" {
-		mongoURL = "mongodb://localhost:27017"
+	// Set up storage - using MongoDB
+	mongoConnString := os.Getenv("MONGO_URL")
+	if mongoConnString == "" {
+		mongoConnString = "mongodb://localhost:27017"
 	}
-	store, err = storage.NewMongoStorage(mongoURL, "mnee", beefStorage, publisher)
+	store, err = storage.NewMongoEventDataStorage(mongoConnString, "bsv21", beefStorage, publisher)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
@@ -101,22 +100,29 @@ func main() {
 		}
 	}()
 	
-	// Storage is already initialized in init()
-
-	mongoURL := os.Getenv("MONGO_URL")
-	if mongoURL == "" {
-		mongoURL = "mongodb://localhost:27017"
+	// Define whitelist key
+	const whitelistKey = "bsv21:whitelist"
+	
+	// Log current whitelist
+	if tokens, err := rdb.SMembers(ctx, whitelistKey).Result(); err == nil {
+		log.Printf("Token whitelist: %v", tokens)
+	} else {
+		log.Printf("Failed to get token whitelist: %v", err)
 	}
-	bsv21Lookup, err := lookups.NewBsv21EventsLookup(mongoURL, "mnee", store)
+	
+	// Storage is already initialized in init()
+	// Cast store to EventDataStorage for the lookup
+	eventStorage, ok := store.(storage.EventDataStorage)
+	if !ok {
+		log.Fatalf("Storage does not implement EventDataStorage interface")
+	}
+	
+	bsv21Lookup, err := lookups.NewBsv21EventsLookup(eventStorage)
 	if err != nil {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
 	defer func() {
-		if bsv21Lookup != nil {
-			if err := bsv21Lookup.Close(); err != nil {
-				log.Printf("Error closing bsv21 lookup: %v", err)
-			}
-		}
+		// Bsv21EventsLookup doesn't need closing - storage is closed elsewhere
 		log.Println("Application shutdown complete.")
 	}()
 
@@ -155,12 +161,33 @@ func main() {
 		default:
 		}
 		
-		iter := rdb.Scan(ctx, 0, "tok:*", 0).Iterator()
+		// Get whitelisted tokens
+		whitelistedTokens, err := rdb.SMembers(ctx, whitelistKey).Result()
+		if err != nil {
+			log.Printf("Failed to get whitelisted tokens: %v", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		
 		hasRows := false
 		var wg sync.WaitGroup
-		for iter.Next(ctx) {
+		
+		// Process each whitelisted token
+		for _, tokenId := range whitelistedTokens {
+			key := "tok:" + tokenId
+			
+			// Check if this token has any transactions to process
+			exists, err := rdb.Exists(ctx, key).Result()
+			if err != nil {
+				log.Printf("Failed to check existence of key %s: %v", key, err)
+				continue
+			}
+			if exists == 0 {
+				// No transactions for this token
+				continue
+			}
+			
 			hasRows = true
-			key := iter.Val()
 			select {
 			case <-ctx.Done():
 				log.Println("Context canceled, waiting for active goroutines...")
@@ -169,13 +196,12 @@ func main() {
 			default:
 				limiter <- struct{}{}
 				wg.Add(1)
-				go func(key string) {
+				go func(tokenId string, key string) {
 					defer func() {
 						wg.Done()
 						<-limiter
 					}()
-					parts := strings.Split(key, ":")
-					tokenId := parts[1]
+					
 					// log.Println("Processing key:", tokenId)
 
 					tm := "tm_" + tokenId
@@ -190,7 +216,7 @@ func main() {
 							),
 						},
 						LookupServices: map[string]engine.LookupService{
-							"mnee": bsv21Lookup,
+							"bsv21": bsv21Lookup,
 						},
 						Storage:      store,
 						ChainTracker: chaintracker,
@@ -263,7 +289,7 @@ func main() {
 					}
 					duration := time.Since(logTime)
 					log.Printf("Processed %s tx %d in %v %vtx/s\n", tokenId, len(txids), duration, float64(len(txids))/duration.Seconds())
-				}(key)
+				}(tokenId, key)
 			}
 		}
 		wg.Wait()

@@ -74,7 +74,7 @@ func main() {
 		query := redis.ZRangeArgs{
 			Stop:    "+inf",
 			Start:   "-inf",
-			Key:     "mnee",
+			Key:     "bsv21",
 			ByScore: true,
 			Count:   1000,
 		}
@@ -85,7 +85,7 @@ func main() {
 		} else {
 			log.Println("Processing", len(txids), "txids")
 			var wg sync.WaitGroup
-			limiter := make(chan struct{}, 16)
+			limiter := make(chan struct{}, 64)
 			for _, txidStr := range txids {
 				wg.Add(1)
 				limiter <- struct{}{}
@@ -140,7 +140,7 @@ func main() {
 								}
 							}
 						}
-						if err := rdb.ZRem(ctx, "mnee", txidStr).Err(); err != nil {
+						if err := rdb.ZRem(ctx, "bsv21", txidStr).Err(); err != nil {
 							log.Fatalf("Failed to remove from Redis: %v", err)
 						}
 					}

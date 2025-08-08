@@ -1,0 +1,486 @@
+basePath: /
+definitions:
+  cmd_server.BSV21BalanceResponse:
+    description: BSV21 token balance for an address
+    properties:
+      balance:
+        example: 1000000
+        type: integer
+      utxoCount:
+        example: 5
+        type: integer
+    type: object
+  cmd_server.BSV21BlockDataResponse:
+    description: BSV21 transactions for a specific block
+    properties:
+      block:
+        $ref: '#/definitions/cmd_server.BlockHeaderResponse'
+      transactions:
+        items:
+          $ref: '#/definitions/cmd_server.TransactionData'
+        type: array
+    type: object
+  cmd_server.BSV21EventResponse:
+    description: BSV21 event data
+    properties:
+      data:
+        $ref: '#/definitions/cmd_server.BSV21Data'
+      outpoint:
+        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+        type: string
+      score:
+        example: 902578.000001234
+        type: number
+    type: object
+  cmd_server.BSV21Data:
+    description: BSV21 token data structure
+    properties:
+      op:
+        description: Operation type (deploy, mint, transfer)
+        example: transfer
+        type: string
+      amt:
+        description: Amount being transferred or minted
+        example: 1000000
+        type: integer
+      dec:
+        description: Decimal places
+        example: 8
+        type: integer
+      max:
+        description: Maximum supply
+        example: 21000000
+        type: integer
+      lim:
+        description: Mint limit per transaction
+        example: 1000
+        type: integer
+      sym:
+        description: Token symbol
+        example: BSV21
+        type: string
+      icon:
+        description: Token icon URL
+        example: https://example.com/icon.png
+        type: string
+      id:
+        description: Token ID (txid_vout format)
+        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+        type: string
+    type: object
+  cmd_server.BlockHeaderResponse:
+    description: Bitcoin block header information
+    properties:
+      creationTimestamp:
+        example: 1699564800
+        type: integer
+      difficultyTarget:
+        example: 403014710
+        type: integer
+      hash:
+        example: 000000000000000000034b7f5e7e5e5a5b5c5d5e5f5g5h5i5j5k5l5m5n5o5p
+        type: string
+      height:
+        example: 902578
+        type: integer
+      merkleRoot:
+        example: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+        type: string
+      nonce:
+        example: 1234567890
+        type: integer
+      prevBlockHash:
+        example: 000000000000000000012a3b4c5d6e7f8g9h0i1j2k3l4m5n6o7p8q9r0s1t2u3
+        type: string
+      version:
+        example: 536870912
+        type: integer
+    type: object
+  cmd_server.TransactionData:
+    description: Transaction with its inputs and outputs
+    properties:
+      txid:
+        description: Transaction ID
+        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127
+        type: string
+      inputs:
+        description: Transaction inputs
+        items:
+          $ref: '#/definitions/cmd_server.OutputData'
+        type: array
+      outputs:
+        description: Transaction outputs
+        items:
+          $ref: '#/definitions/cmd_server.OutputData'
+        type: array
+    type: object
+  cmd_server.OutputData:
+    description: Input or output data
+    properties:
+      txid:
+        description: Source transaction ID (only for inputs)
+        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127
+        type: string
+      vout:
+        description: Output index
+        example: 0
+        type: integer
+      data:
+        description: BSV21 token data
+        $ref: '#/definitions/cmd_server.BSV21Data'
+      script:
+        description: Output script in hex
+        example: 76a914...88ac
+        type: string
+      satoshis:
+        description: Satoshi amount
+        example: 1
+        type: integer
+    type: object
+  cmd_server.ErrorResponse:
+    description: Error response returned by the API
+    properties:
+      message:
+        example: Invalid token ID format
+        type: string
+    type: object
+host: localhost:3000
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: Error response returned by the API
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: BSV21 Overlay API
+  version: "1.0"
+paths:
+  /1sat/block/{height}:
+    get:
+      consumes:
+      - application/json
+      description: Get block header information for a specific height
+      parameters:
+      - description: Block height
+        in: path
+        name: height
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.BlockHeaderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Get block by height
+      tags:
+      - 1sat-blocks
+  /1sat/block/tip:
+    get:
+      consumes:
+      - application/json
+      description: Get the current blockchain tip with full header information
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.BlockHeaderResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Get current block tip
+      tags:
+      - 1sat-blocks
+  /1sat/bsv21/{tokenId}/{lockType}/{address}/balance:
+    get:
+      consumes:
+      - application/json
+      description: Get the balance of a BSV21 token for a specific address
+      parameters:
+      - description: 'Token ID (ordinal format: txid_vout)'
+        in: path
+        name: tokenId
+        required: true
+        type: string
+      - description: Lock type (p2pkh, cos, ltm, pow20, etc.)
+        in: path
+        name: lockType
+        required: true
+        type: string
+      - description: Bitcoin address
+        in: path
+        name: address
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.BSV21BalanceResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Get BSV21 token balance
+      tags:
+      - 1sat-bsv21
+  /1sat/bsv21/{tokenId}/block/{height}:
+    get:
+      consumes:
+      - application/json
+      description: Get all BSV21 transactions for a specific token at a given block
+        height
+      parameters:
+      - description: 'Token ID (ordinal format: txid_vout)'
+        in: path
+        name: tokenId
+        required: true
+        type: string
+      - description: Block height
+        in: path
+        name: height
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.BSV21BlockDataResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Get BSV21 transactions for a block
+      tags:
+      - 1sat-bsv21
+  /1sat/events/{event}:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve all overlay events (both spent and unspent) for a specific
+        event pattern
+      parameters:
+      - description: 'Event pattern: id:tokenId, sym:SYMBOL, p2pkh:address:tokenId,
+          cos:address:tokenId, ltm:tokenId, pow20:tokenId, list:address'
+        in: path
+        name: event
+        required: true
+        type: string
+      - description: Starting score (for pagination)
+        in: query
+        name: from
+        type: number
+      - description: Maximum number of results (default 100, max 1000)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/cmd_server.BSV21EventResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Get all overlay events
+      tags:
+      - 1sat-events
+  /1sat/events/{event}/unspent:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve only unspent overlay events for a specific event pattern
+      parameters:
+      - description: 'Event pattern: id:tokenId, sym:SYMBOL, p2pkh:address:tokenId,
+          cos:address:tokenId, ltm:tokenId, pow20:tokenId, list:address'
+        in: path
+        name: event
+        required: true
+        type: string
+      - description: Starting score (for pagination)
+        in: query
+        name: from
+        type: number
+      - description: Maximum number of results (default 100, max 1000)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/cmd_server.BSV21EventResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Get unspent overlay events
+      tags:
+      - 1sat-events
+  /1sat/subscribe/{topics}:
+    get:
+      description: Server-Sent Events (SSE) stream for real-time BSV21 events
+      parameters:
+      - description: Comma-separated list of topics to subscribe to
+        in: path
+        name: topics
+        required: true
+        type: string
+      - description: Resume from this event ID (score)
+        in: header
+        name: Last-Event-ID
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+      summary: Subscribe to BSV21 events
+      tags:
+      - 1sat-events
+  /arc-ingest:
+    post:
+      consumes:
+      - application/json
+      description: Webhook endpoint for ARC transaction status updates
+      parameters:
+      - description: Transaction status update from ARC
+        in: body
+        name: status
+        required: true
+        schema:
+          type: object
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: ARC webhook for transaction status
+      tags:
+      - webhooks
+  /lookup:
+    post:
+      consumes:
+      - application/json
+      description: Query overlay events with complex filters via POST
+      parameters:
+      - description: Lookup query with event filters
+        in: body
+        name: query
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/cmd_server.BSV21EventResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Query overlay events
+      tags:
+      - overlay
+  /submit:
+    post:
+      consumes:
+      - application/octet-stream
+      description: Submit a tagged BEEF transaction for processing by the overlay
+      parameters:
+      - description: Comma-separated list of topics
+        in: header
+        name: x-topics
+        required: true
+        type: string
+      - description: BEEF transaction data (binary)
+        in: body
+        name: beef
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Submit tagged BEEF transaction
+      tags:
+      - overlay
+schemes:
+- http
+- https
+swagger: "2.0"
+tags:
+- description: BSV21 token-specific operations under the 1sat namespace
+  name: 1sat-bsv21
+- description: Blockchain block operations under the 1sat namespace
+  name: 1sat-blocks
+- description: Event querying and streaming under the 1sat namespace
+  name: 1sat-events
+- description: Core overlay service operations
+  name: overlay
+- description: Webhook endpoints for external integrations
+  name: webhooks
