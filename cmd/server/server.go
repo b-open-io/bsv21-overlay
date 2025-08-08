@@ -161,16 +161,16 @@ func main() {
 		log.Fatalf("Failed to create publisher: %v", err)
 	}
 
-	// Initialize storage
-	// Initialize storage - using MongoDB
-	mongoConnString := os.Getenv("MONGO_URL")
-	if mongoConnString == "" {
-		mongoConnString = "mongodb://localhost:27017"
-	}
-	store, err = storage.NewMongoEventDataStorage(mongoConnString, "bsv21", beefStorage, publisher)
+	// Initialize storage based on EVENT_STORAGE environment variable
+	store, err = storage.CreateEventDataStorage("bsv21", beefStorage, publisher)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
+	storageType := os.Getenv("EVENT_STORAGE")
+	if storageType == "" {
+		storageType = "sqlite (default)"
+	}
+	log.Printf("Using storage type: %s", storageType)
 
 	// Initialize BSV21 lookup service
 	bsv21Lookup, err = lookups.NewBsv21EventsLookup(store)

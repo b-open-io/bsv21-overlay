@@ -55,15 +55,16 @@ func init() {
 		log.Fatalf("Failed to create publisher: %v", err)
 	}
 
-	// Set up storage - using MongoDB
-	mongoConnString := os.Getenv("MONGO_URL")
-	if mongoConnString == "" {
-		mongoConnString = "mongodb://localhost:27017"
-	}
-	store, err = storage.NewMongoEventDataStorage(mongoConnString, "bsv21", beefStorage, publisher)
+	// Set up storage based on EVENT_STORAGE environment variable
+	store, err = storage.CreateEventDataStorage("bsv21", beefStorage, publisher)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
+	storageType := os.Getenv("EVENT_STORAGE")
+	if storageType == "" {
+		storageType = "sqlite (default)"
+	}
+	log.Printf("Using storage type: %s", storageType)
 
 	// Set up chain tracker
 	chaintracker = &headers_client.Client{
