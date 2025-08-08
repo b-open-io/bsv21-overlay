@@ -237,13 +237,6 @@ func main() {
 	// Setup Swagger documentation
 	setupSwagger(app)
 
-	// Register overlay service routes using server pattern
-	server.RegisterRoutes(app, &server.RegisterRoutesConfig{
-		ARCAPIKey:        os.Getenv("ARC_API_KEY"),
-		ARCCallbackToken: os.Getenv("ARC_CALLBACK_TOKEN"),
-		Engine:           e,
-	})
-
 	onesat := app.Group("/1sat")
 
 	// Common handler for parsing event query parameters
@@ -609,6 +602,13 @@ func main() {
 		topicClientsMutex.Unlock()
 
 		return nil
+	})
+
+	// Register overlay service routes using server pattern
+	server.RegisterRoutes(app, &server.RegisterRoutesConfig{
+		ARCAPIKey:        os.Getenv("ARC_API_KEY"),
+		ARCCallbackToken: os.Getenv("ARC_CALLBACK_TOKEN"),
+		Engine:           e,
 	})
 
 	// Start the server in a goroutine
