@@ -23,7 +23,7 @@ var beefStorage beef.BeefStorage
 var chaintracker *headers_client.Client
 
 func init() {
-	godotenv.Load("../../.env")
+	godotenv.Load(".env")
 
 	// Set up BEEF storage
 	redisBeefURL := os.Getenv("REDIS_BEEF")

@@ -2,3 +2,6 @@
 cache
 data
 *.run
+
+beef_storage
+*.db*

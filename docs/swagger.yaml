@@ -17,14 +17,16 @@ definitions:
         $ref: '#/definitions/cmd_server.BlockHeaderResponse'
       transactions:
         items:
-          $ref: '#/definitions/cmd_server.TransactionData'
+          additionalProperties: true
+          type: object
         type: array
     type: object
   cmd_server.BSV21EventResponse:
     description: BSV21 event data
     properties:
       data:
-        $ref: '#/definitions/cmd_server.BSV21Data'
+        additionalProperties: true
+        type: object
       outpoint:
         example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
         type: string
@@ -32,41 +34,36 @@ definitions:
         example: 902578.000001234
         type: number
     type: object
-  cmd_server.BSV21Data:
-    description: BSV21 token data structure
+  cmd_server.BSV21TokenDetailsResponse:
+    description: BSV21 token mint transaction details
     properties:
-      op:
-        description: Operation type (deploy, mint, transfer)
-        example: transfer
+      address:
+        example: 1Address...
         type: string
-      amt:
-        description: Amount being transferred or minted
-        example: 1000000
+      amount:
+        example: 2100000000000000
         type: integer
       dec:
-        description: Decimal places
-        example: 8
+        example: 0
         type: integer
-      max:
-        description: Maximum supply
-        example: 21000000
-        type: integer
-      lim:
-        description: Mint limit per transaction
-        example: 1000
-        type: integer
-      sym:
-        description: Token symbol
-        example: BSV21
-        type: string
       icon:
-        description: Token icon URL
-        example: https://example.com/icon.png
+        example: https://example.com/token-icon.png
         type: string
-      id:
-        description: Token ID (txid_vout format)
+      op:
+        example: deploy+mint
+        type: string
+      sym:
+        example: SHUA
+        type: string
+      tokenId:
         example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
         type: string
+      txid:
+        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127
+        type: string
+      vout:
+        example: 0
+        type: integer
     type: object
   cmd_server.BlockHeaderResponse:
     description: Bitcoin block header information
@@ -96,47 +93,6 @@ definitions:
         example: 536870912
         type: integer
     type: object
-  cmd_server.TransactionData:
-    description: Transaction with its inputs and outputs
-    properties:
-      txid:
-        description: Transaction ID
-        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127
-        type: string
-      inputs:
-        description: Transaction inputs
-        items:
-          $ref: '#/definitions/cmd_server.OutputData'
-        type: array
-      outputs:
-        description: Transaction outputs
-        items:
-          $ref: '#/definitions/cmd_server.OutputData'
-        type: array
-    type: object
-  cmd_server.OutputData:
-    description: Input or output data
-    properties:
-      txid:
-        description: Source transaction ID (only for inputs)
-        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127
-        type: string
-      vout:
-        description: Output index
-        example: 0
-        type: integer
-      data:
-        description: BSV21 token data
-        $ref: '#/definitions/cmd_server.BSV21Data'
-      script:
-        description: Output script in hex
-        example: 76a914...88ac
-        type: string
-      satoshis:
-        description: Satoshi amount
-        example: 1
-        type: integer
-    type: object
   cmd_server.ErrorResponse:
     description: Error response returned by the API
     properties:
@@ -144,7 +100,6 @@ definitions:
         example: Invalid token ID format
         type: string
     type: object
-host: localhost:3000
 info:
   contact:
     email: support@swagger.io
@@ -206,6 +161,39 @@ paths:
       summary: Get current block tip
       tags:
       - 1sat-blocks
+  /1sat/bsv21/{tokenId}:
+    get:
+      consumes:
+      - application/json
+      description: Get the mint transaction details for a specific BSV21 token
+      parameters:
+      - description: 'Token ID (ordinal format: txid_vout)'
+        in: path
+        name: tokenId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.BSV21TokenDetailsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Get BSV21 token details
+      tags:
+      - 1sat-bsv21
   /1sat/bsv21/{tokenId}/{lockType}/{address}/balance:
     get:
       consumes:

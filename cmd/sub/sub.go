@@ -22,7 +22,7 @@ func main() {
 	)
 
 	flag.StringVar(&topicID, "topic", "", "Topic ID to subscribe to (required)")
-	flag.StringVar(&envFile, "env", "../../.env", "Path to .env file")
+	flag.StringVar(&envFile, "env", ".env", "Path to .env file")
 	flag.Parse()
 
 	// Load environment configuration

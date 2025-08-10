@@ -11,8 +11,7 @@ import (
 
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/topics"
-	"github.com/b-open-io/overlay/beef"
-	"github.com/b-open-io/overlay/publish"
+	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
@@ -24,8 +23,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var beefStorage beef.BeefStorage
-var publisher publish.Publisher
 var store engine.Storage
 var chaintracker *headers_client.Client
 
@@ -36,35 +33,14 @@ type tokenSummary struct {
 }
 
 func init() {
-	godotenv.Load("../../.env")
+	godotenv.Load(".env")
 
-	// Set up BEEF storage
-	redisBeefURL := os.Getenv("REDIS_BEEF")
-	if redisBeefURL == "" {
-		redisBeefURL = os.Getenv("REDIS_URL")
-	}
+	// Create storage using the new configuration approach
 	var err error
-	beefStorage, err = beef.NewRedisBeefStorage(redisBeefURL, 0)
-	if err != nil {
-		log.Fatalf("Failed to create BEEF storage: %v", err)
-	}
-
-	// Set up publisher
-	publisher, err = publish.NewRedisPublish(os.Getenv("REDIS_URL"))
-	if err != nil {
-		log.Fatalf("Failed to create publisher: %v", err)
-	}
-
-	// Set up storage based on EVENT_STORAGE environment variable
-	store, err = storage.CreateEventDataStorage("bsv21", beefStorage, publisher)
+	store, err = config.CreateEventStorage("", "", "")
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
-	storageType := os.Getenv("EVENT_STORAGE")
-	if storageType == "" {
-		storageType = "sqlite (default)"
-	}
-	log.Printf("Using storage type: %s", storageType)
 
 	// Set up chain tracker
 	chaintracker = &headers_client.Client{
@@ -245,7 +221,7 @@ func main() {
 							// log.Println("Processing", parts[1], txidStr)
 							if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
 								log.Fatalf("Invalid txid: %v", err)
-							} else if tx, err := beefStorage.LoadTx(ctx, txid, chaintracker); err != nil {
+							} else if tx, err := eventStorage.GetBeefStorage().LoadTx(ctx, txid, chaintracker); err != nil {
 								log.Fatalf("Failed to load transaction: %v", err)
 							} else {
 								beefDoc := &transaction.Beef{
@@ -253,7 +229,7 @@ func main() {
 									Transactions: map[chainhash.Hash]*transaction.BeefTx{},
 								}
 								for _, input := range tx.Inputs {
-									if input.SourceTransaction, err = beefStorage.LoadTx(ctx, input.SourceTXID, chaintracker); err != nil {
+									if input.SourceTransaction, err = eventStorage.GetBeefStorage().LoadTx(ctx, input.SourceTXID, chaintracker); err != nil {
 										log.Fatalf("Failed to load source transaction: %v", err)
 									} else if _, err := beefDoc.MergeTransaction(input.SourceTransaction); err != nil {
 										log.Fatalf("Failed to merge source transaction: %v", err)

@@ -97,6 +97,56 @@ const docTemplate = `{
                 }
             }
         },
+        "/1sat/bsv21/{tokenId}": {
+            "get": {
+                "description": "Get the mint transaction details for a specific BSV21 token",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "1sat-bsv21"
+                ],
+                "summary": "Get BSV21 token details",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token ID (ordinal format: txid_vout)",
+                        "name": "tokenId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.BSV21TokenDetailsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/1sat/bsv21/{tokenId}/block/{height}": {
             "get": {
                 "description": "Get all BSV21 transactions for a specific token at a given block height",
@@ -539,6 +589,48 @@ const docTemplate = `{
                 }
             }
         },
+        "cmd_server.BSV21TokenDetailsResponse": {
+            "description": "BSV21 token mint transaction details",
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "example": "1Address..."
+                },
+                "amount": {
+                    "type": "integer",
+                    "example": 2100000000000000
+                },
+                "dec": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "icon": {
+                    "type": "string",
+                    "example": "https://example.com/token-icon.png"
+                },
+                "op": {
+                    "type": "string",
+                    "example": "deploy+mint"
+                },
+                "sym": {
+                    "type": "string",
+                    "example": "SHUA"
+                },
+                "tokenId": {
+                    "type": "string",
+                    "example": "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"
+                },
+                "txid": {
+                    "type": "string",
+                    "example": "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127"
+                },
+                "vout": {
+                    "type": "integer",
+                    "example": 0
+                }
+            }
+        },
         "cmd_server.BlockHeaderResponse": {
             "description": "Bitcoin block header information",
             "type": "object",
@@ -615,7 +707,7 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:3000",
+	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{"http", "https"},
 	Title:            "BSV21 Overlay API",

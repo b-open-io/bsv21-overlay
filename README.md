@@ -50,24 +50,26 @@ go build -o server.run cmd/server/server.go
 
 ### Configuration
 
-The service is configured using environment variables:
+The service uses connection strings that auto-detect the storage type:
 
 ```bash
-# BEEF Storage Configuration (Required)
-export REDIS_BEEF=redis://localhost:6379
+# Event Storage (Required - auto-detects type from URL)
+export EVENT_STORAGE=mongodb://user:pass@localhost:27017/bsv21?authSource=admin  # MongoDB
+# OR
+export EVENT_STORAGE=redis://localhost:6379           # Redis
+# OR
+export EVENT_STORAGE=./overlay.db                     # SQLite (local file)
 
-# Event Storage Configuration (Choose one)
-# For MongoDB event storage:
-export MONGO_URL=mongodb://localhost:27017
-export EVENT_STORAGE=mongo  # Options: mongo, redis, sqlite
+# BEEF Storage (Optional - defaults to ./beef_storage/)
+export BEEF_STORAGE=redis://localhost:6379            # Redis (recommended for production)
+# OR
+export BEEF_STORAGE=mongodb://user:pass@localhost:27017/beef?authSource=admin    # MongoDB
+# OR
+export BEEF_STORAGE=./beef.db                         # SQLite
+# OR leave unset to use ./beef_storage/ directory     # Filesystem (default)
 
-# For Redis event storage (alternative to MongoDB):
-# export REDIS=redis://localhost:6379
-# export EVENT_STORAGE=redis
-
-# For SQLite event storage (alternative to MongoDB):
-# export SQLITE_PATH=./events.db
-# export EVENT_STORAGE=sqlite
+# Publisher Configuration (Required)
+export REDIS_URL=redis://localhost:6379               # Redis for pub/sub
 
 # Service Configuration
 export PORT=3000
@@ -85,6 +87,29 @@ export ARC_API_KEY=your_arc_api_key
 export ARC_CALLBACK_TOKEN=your_callback_token
 ```
 
+#### Common Configuration Examples
+
+**Development (minimal setup):**
+```bash
+export REDIS_URL=redis://localhost:6379
+# EVENT_STORAGE defaults to ./overlay.db
+# BEEF_STORAGE defaults to ./beef_storage/
+```
+
+**Production (high performance):**
+```bash
+export EVENT_STORAGE=mongodb://user:pass@localhost:27017/bsv21?authSource=admin
+export BEEF_STORAGE=redis://localhost:6379
+export REDIS_URL=redis://localhost:6379
+```
+
+**All Redis:**
+```bash
+export EVENT_STORAGE=redis://localhost:6379
+export BEEF_STORAGE=redis://localhost:6379
+export REDIS_URL=redis://localhost:6379
+```
+
 For development convenience, you can create a `.env` file in the project root with these variables (without the `export` prefix), which will be automatically loaded when running from the source directory.
 
 ### Running the Service
@@ -97,7 +122,7 @@ For development convenience, you can create a `.env` file in the project root wi
 ./server.run -p 8080
 
 # Or run with environment variables set inline
-REDIS_BEEF=redis://redis-host:6379 MONGO_URL=mongodb://mongo-host:27017 ./server.run
+EVENT_STORAGE=mongodb://user:pass@mongo-host:27017/bsv21?authSource=admin BEEF_STORAGE=redis://redis-host:6379 ./server.run
 ```
 
 The server will start on port 3000 by default. You can now:
@@ -119,7 +144,7 @@ Query events by type with pagination support.
 
 **Parameters:**
 - `event` - Event type (e.g., `id:tokenId`, `p2pkh:address:tokenId`, `sym:SYMBOL`)
-- `from` - Starting position as `height.idx` (optional)
+- `from` - Starting score as float64 (optional)
 - `limit` - Number of results (max 1000, default 100)
 
 **Example:**
@@ -128,42 +153,134 @@ Query events by type with pagination support.
 curl http://localhost:3000/1sat/events/id:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1
 
 # Get events for a specific address and token
-curl http://localhost:3000/1sat/events/p2pkh:1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64:36b8aeff...
+curl http://localhost:3000/1sat/events/p2pkh:1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1
 ```
 
-#### Get Token Balance
+#### Get Unspent Events
 ```
-GET /1sat/bsv21/:event/balance
+GET /1sat/events/:event/unspent
 ```
 
-Calculate the total balance for unspent outputs of an event type.
+Query only unspent outputs for an event type.
+
+**Parameters:**
+- `event` - Event type
+- `from` - Starting score as float64 (optional)
+- `limit` - Number of results (max 1000, default 100)
 
 **Example:**
 ```bash
-# Get total balance for a token
-curl http://localhost:3000/1sat/bsv21/id:36b8aeff.../balance
+# Get unspent outputs for a token
+curl http://localhost:3000/1sat/events/id:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/unspent
+```
 
-# Get balance for address-specific holdings
-curl http://localhost:3000/1sat/bsv21/p2pkh:1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64:36b8aeff.../balance
+#### Get Token Information
+```
+GET /1sat/bsv21/:tokenId
+```
+
+Get detailed information about a BSV21 token.
+
+**Example:**
+```bash
+# Get token details
+curl http://localhost:3000/1sat/bsv21/36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1
+```
+
+#### Get Balance for Address
+```
+GET /1sat/bsv21/:tokenId/:lockType/:address/balance
+```
+
+Calculate the balance for a specific address and lock type.
+
+**Parameters:**
+- `tokenId` - Token identifier (txid_vout format)
+- `lockType` - Type of locking script (e.g., `p2pkh`, `cos`, `ltm`)
+- `address` - Address or identifier
+
+**Example:**
+```bash
+# Get balance for P2PKH address
+curl http://localhost:3000/1sat/bsv21/36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/p2pkh/1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64/balance
+```
+
+#### Get Balance for Multiple Addresses
+```
+POST /1sat/bsv21/:tokenId/:lockType/balance
+```
+
+Calculate the combined balance for multiple addresses.
+
+**Body:** JSON array of addresses
+
+**Example:**
+```bash
+# Get combined balance for multiple addresses
+curl -X POST http://localhost:3000/1sat/bsv21/36b8aeff.../p2pkh/balance \
+  -H "Content-Type: application/json" \
+  -d '["1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"]'
+```
+
+### Block Information
+
+#### Get Current Block Tip
+```
+GET /1sat/block/tip
+```
+
+Get information about the current blockchain tip.
+
+**Example:**
+```bash
+curl http://localhost:3000/1sat/block/tip
+```
+
+#### Get Block by Height
+```
+GET /1sat/block/:height
+```
+
+Get block header information for a specific height.
+
+**Example:**
+```bash
+curl http://localhost:3000/1sat/block/850000
+```
+
+#### Get Token Transactions at Block Height
+```
+GET /1sat/bsv21/:tokenId/block/:height
+```
+
+Get all transactions for a specific token at a given block height.
+
+**Example:**
+```bash
+curl http://localhost:3000/1sat/bsv21/36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/block/850000
 ```
 
 ### Real-time Events
 
 #### Subscribe to Events
 ```
-GET /subscribe/:topics
+GET /1sat/subscribe/:topics
 ```
 
 Subscribe to real-time events via Server-Sent Events (SSE).
 
 **Parameters:**
-- `topics` - Comma-separated list of topics to subscribe to
+- `topics` - Comma-separated list of event types to subscribe to
+
+**Headers:**
+- `Last-Event-ID` - Resume from a specific score (optional)
 
 **Example:**
 ```javascript
-const eventSource = new EventSource('http://localhost:3000/subscribe/topic1,topic2');
+const eventSource = new EventSource('http://localhost:3000/1sat/subscribe/id:tokenId1,p2pkh:address:tokenId2');
 eventSource.onmessage = (event) => {
     console.log('New event:', event.data);
+    console.log('Event score:', event.lastEventId);
 };
 ```
 
@@ -181,31 +298,6 @@ Submit a tagged BEEF transaction for processing.
 - `Content-Type: application/octet-stream`
 
 **Body:** Raw BEEF bytes
-
-### Lookup Service
-
-#### Query Events
-```
-POST /lookup
-```
-
-Query events using the lookup service protocol.
-
-**Body:**
-```json
-{
-    "service": "ls_bsv21",
-    "query": {
-        "event": "id:tokenId",
-        "from": {
-            "height": 850000,
-            "idx": 0
-        },
-        "limit": 100,
-        "spent": false
-    }
-}
-```
 
 ## Event Types
 
@@ -234,19 +326,28 @@ The BSV21 overlay service is built around an event-driven architecture:
 
 ### Storage
 
-The service uses two types of storage:
+The service uses two types of storage with auto-detection from connection strings:
 
-#### BEEF Storage (Required)
-- **Redis** (`REDIS_BEEF`): Stores raw transaction data (BEEF - Bitcoin Extended Format)
-- Used for SPV validation and transaction retrieval
-- Must be configured for all deployments
+#### BEEF Storage
+Stores raw transaction data (BEEF - Bitcoin Extended Format) for SPV validation.
 
-#### Event Storage (Choose One)
-- **MongoDB** (default): Full-featured event storage with Decimal128 for uint64 amounts
-- **Redis**: High-performance in-memory event storage
-- **SQLite**: Lightweight file-based storage for single-node deployments
+**Options (auto-detected from URL):**
+- **Redis** (`redis://...`): High-performance key-value storage (recommended for production)
+- **MongoDB** (`mongodb://...`): Document storage with GridFS for large transactions
+- **SQLite** (`./beef.db`): Local file database for development
+- **Filesystem** (`./beef_storage/`): Directory-based storage (default if `BEEF_STORAGE` not set)
 
-Note: The `REDIS` environment variable is only needed if using Redis for event storage or the optional JungleBus tools.
+#### Event Storage
+Stores processed BSV21 events with indexing for efficient queries.
+
+**Options (auto-detected from URL):**
+- **MongoDB** (`mongodb://...`): Full-featured storage with Decimal128 for uint64 amounts
+  - Include `?authSource=admin` in connection string if authenticating against admin database
+  - Example: `mongodb://user:pass@host:27017/dbname?authSource=admin`
+- **Redis** (`redis://...`): High-performance in-memory event storage
+- **SQLite** (`./overlay.db`): Lightweight file-based storage for single-node deployments
+
+Note: `REDIS_URL` is always required for the publisher (pub/sub functionality).
 
 ### Event Value Storage
 
@@ -266,13 +367,14 @@ The following values are currently hard-coded but can be made configurable:
 
 | Value | Current | Location | Purpose |
 |-------|---------|----------|---------|
-| Database name | `mnee` | Multiple files | MongoDB database name |
-| Queue name | `mnee` | sub.go, queue.go | Main Redis queue |
-| Topic ID | `9cdb5ad5...` | sub.go | JungleBus subscription |
-| Start block | `883989` | sub.go | Initial sync block |
-| Concurrency | `16` | queue.go, process.go | Goroutine pool size |
-| Batch size | `1000` | Multiple files | Query and API limits |
-| Queue size | `10000000` | sub.go | JungleBus queue capacity |
+| Database name | Extracted from URL | MongoDB driver | MongoDB database name (e.g., `/bsv21` in connection string) |
+| Whitelist key | `bsv21:whitelist` | process.go | Redis key for token whitelist |
+| Topic prefix | `tok:` | process.go | Redis key prefix for token queues |
+| Concurrency | `16` | process.go | Goroutine pool size |
+| API limit | `1000` | server.go | Maximum results per query |
+| Default database | `overlay` | storage/mongo.go | Default MongoDB database if not in URL |
+| Default BEEF path | `./beef_storage/` | beef/factory.go | Default filesystem storage for BEEF |
+| Default event DB | `./overlay.db` | storage/factory.go | Default SQLite database for events |
 
 ### Performance Tuning
 
@@ -315,61 +417,6 @@ go doc -all ./...
 ### Slow processing
 - Increase concurrency limits if CPU allows
 - Ensure MongoDB has proper indexes
-- Check network latency to JungleBus
-
-## Advanced Features
-
-### Bulk Data Ingestion with JungleBus
-
-For deployments that need to process all BSV21 transactions on the network (not just those submitted via API), this repository includes optional JungleBus integration tools.
-
-#### When to Use JungleBus
-
-- Processing historical blockchain data
-- Monitoring all BSV21 activity network-wide
-- Building comprehensive token indexes
-- Running a public BSV21 explorer
-
-#### Components
-
-- `sub.run` - Subscribes to JungleBus for blockchain transactions
-- `queue.run` - Filters and sorts BSV21 transactions by token ID
-- `process.run` - Validates and indexes transactions in bulk
-
-#### Configuration
-
-```bash
-# Additional environment variables for JungleBus
-export REDIS=redis://localhost:6379  # Queue storage (can be same as REDIS_BEEF)
-export JUNGLEBUS=https://junglebus.gorillapool.io
-export JUNGLEBUS_TOPIC_ID=9cdb5ad57e83efe18804f5910742d804f93ff5bc1a86831a347341b773d629be
-export JUNGLEBUS_FROM_BLOCK=883989  # Optional: starting block
-
-# Queue configuration
-export QUEUE_NAME=mnee  # Redis queue name
-export QUEUE_BATCH_SIZE=1000
-export QUEUE_CONCURRENCY=16
-```
-
-#### Running with JungleBus
-
-```bash
-# Start all services in order
-./sub.run     # 1. Subscribe to blockchain data
-./queue.run   # 2. Process transaction queue
-./process.run # 3. Index BSV21 transactions
-./server.run  # 4. API server (same as standalone)
-```
-
-#### Architecture with JungleBus
-
-```
-Blockchain → JungleBus → sub → Redis Queue → queue → process → Event Storage
-                                                                      ↓
-                                                                 API Server
-```
-
-Note: The API server works the same whether using JungleBus or not. JungleBus simply provides an additional data source beyond the HTTP submission endpoint.
 
 ## License
 

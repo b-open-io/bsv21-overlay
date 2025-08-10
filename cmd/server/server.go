@@ -15,8 +15,7 @@ import (
 
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/topics"
-	"github.com/b-open-io/overlay/beef"
-	"github.com/b-open-io/overlay/publish"
+	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
@@ -38,15 +37,27 @@ var topicClientsMutex = &sync.Mutex{}               // Mutex to protect topicCli
 var peers = []string{}
 var e *engine.Engine
 
+// Command-line flags for storage configuration
+var (
+	eventStorageFlag string
+	beefStorageFlag  string
+	redisURLFlag     string
+)
+
 func init() {
-	godotenv.Load("../../.env")
+	godotenv.Load(".env")
 	chaintracker = &headers_client.Client{
 		Url:    os.Getenv("BLOCK_HEADERS_URL"),
 		ApiKey: os.Getenv("BLOCK_HEADERS_API_KEY"),
 	}
 	PORT, _ = strconv.Atoi(os.Getenv("PORT"))
+	
+	// Define command-line flags
 	flag.IntVar(&PORT, "p", PORT, "Port to listen on")
 	flag.BoolVar(&SYNC, "s", false, "Start sync")
+	flag.StringVar(&eventStorageFlag, "event-storage", "", "Event storage connection string (e.g., mongodb://localhost:27017/bsv21)")
+	flag.StringVar(&beefStorageFlag, "beef-storage", "", "BEEF storage connection string (e.g., redis://localhost:6379)")
+	flag.StringVar(&redisURLFlag, "redis-url", "", "Redis URL for publisher (e.g., redis://localhost:6379)")
 	flag.Parse()
 	if PORT == 0 {
 		PORT = 3000
@@ -145,32 +156,13 @@ func main() {
 
 	hostingUrl := os.Getenv("HOSTING_URL")
 
-	// Initialize BEEF storage
-	redisBeefURL := os.Getenv("REDIS_BEEF")
-	if redisBeefURL == "" {
-		redisBeefURL = os.Getenv("REDIS_URL")
-	}
-	beefStorage, err := beef.NewRedisBeefStorage(redisBeefURL, 0)
-	if err != nil {
-		log.Fatalf("Failed to create BEEF storage: %v", err)
-	}
-
-	// Initialize publisher
-	publisher, err := publish.NewRedisPublish(os.Getenv("REDIS_URL"))
-	if err != nil {
-		log.Fatalf("Failed to create publisher: %v", err)
-	}
-
-	// Initialize storage based on EVENT_STORAGE environment variable
-	store, err = storage.CreateEventDataStorage("bsv21", beefStorage, publisher)
+	// Create storage using the new configuration approach
+	// Command-line flags override environment variables
+	var err error
+	store, err = config.CreateEventStorage(eventStorageFlag, beefStorageFlag, redisURLFlag)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
-	storageType := os.Getenv("EVENT_STORAGE")
-	if storageType == "" {
-		storageType = "sqlite (default)"
-	}
-	log.Printf("Using storage type: %s", storageType)
 
 	// Initialize BSV21 lookup service
 	bsv21Lookup, err = lookups.NewBsv21EventsLookup(store)
