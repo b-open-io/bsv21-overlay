@@ -251,29 +251,9 @@ func (l *Bsv21EventsLookup) GetBalance(ctx context.Context, events []string) (ui
 func (l *Bsv21EventsLookup) GetToken(ctx context.Context, outpoint *transaction.Outpoint) (map[string]interface{}, error) {
 	tokenId := outpoint.OrdinalString()
 	
-	// Check cache first
+	// Check cache first - now caching the response map directly
 	if cached, ok := l.mintCache.Load(tokenId); ok {
-		mintToken := cached.(*bsv21.Bsv21)
-		// Build response from cached data
-		response := map[string]interface{}{
-			"id":   tokenId,
-			"txid": outpoint.Txid.String(),
-			"vout": outpoint.Index,
-			"op":   mintToken.Op,
-			"amt":  mintToken.Amt,
-		}
-		
-		if mintToken.Symbol != nil {
-			response["sym"] = *mintToken.Symbol
-		}
-		if mintToken.Decimals != nil {
-			response["dec"] = *mintToken.Decimals
-		}
-		if mintToken.Icon != nil {
-			response["icon"] = *mintToken.Icon
-		}
-		
-		return response, nil
+		return cached.(map[string]interface{}), nil
 	}
 	
 	// Not in cache, get the data for this specific outpoint
@@ -309,55 +289,34 @@ func (l *Bsv21EventsLookup) GetToken(ctx context.Context, outpoint *transaction.
 		return nil, fmt.Errorf("outpoint exists but is not a mint transaction (op=%s)", op)
 	}
 	
-	// Build the bsv21.Bsv21 struct for caching
-	mintToken := &bsv21.Bsv21{
-		Id: tokenId,
-		Op: op,
-	}
-	
-	// Parse amount
-	if amtStr, ok := bsv21Data["amt"].(string); ok {
-		if amt, err := strconv.ParseUint(amtStr, 10, 64); err == nil {
-			mintToken.Amt = amt
-		}
-	}
-	
-	// Parse optional fields
-	if sym, ok := bsv21Data["sym"].(string); ok {
-		mintToken.Symbol = &sym
-	}
-	
-	if dec, ok := bsv21Data["dec"].(float64); ok {
-		decUint8 := uint8(dec)
-		mintToken.Decimals = &decUint8
-	}
-	
-	if icon, ok := bsv21Data["icon"].(string); ok {
-		mintToken.Icon = &icon
-	}
-	
-	// Cache the mint token
-	l.mintCache.Store(tokenId, mintToken)
-	
 	// Build response with all token details
 	response := map[string]interface{}{
 		"id":   tokenId,
 		"txid": outpoint.Txid.String(),
 		"vout": outpoint.Index,
-		"op":   mintToken.Op,
-		"amt":  mintToken.Amt,
+		"op":   op,
 	}
 	
-	// Include optional fields if present
-	if mintToken.Symbol != nil {
-		response["sym"] = *mintToken.Symbol
+	// Add amount - already stored as string in bsv21Data
+	if amtStr, ok := bsv21Data["amt"].(string); ok {
+		response["amt"] = amtStr
 	}
-	if mintToken.Decimals != nil {
-		response["dec"] = *mintToken.Decimals
+	
+	// Add optional fields if present
+	if sym, ok := bsv21Data["sym"].(string); ok {
+		response["sym"] = sym
 	}
-	if mintToken.Icon != nil {
-		response["icon"] = *mintToken.Icon
+	
+	if dec, ok := bsv21Data["dec"].(float64); ok {
+		response["dec"] = uint8(dec)
 	}
+	
+	if icon, ok := bsv21Data["icon"].(string); ok {
+		response["icon"] = icon
+	}
+	
+	// Cache the response directly
+	l.mintCache.Store(tokenId, response)
 	
 	return response, nil
 }

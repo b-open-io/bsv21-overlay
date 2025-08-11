@@ -1,6 +1,5 @@
-basePath: /
 definitions:
-  cmd_server.BSV21BalanceResponse:
+  main.BSV21BalanceResponse:
     description: BSV21 token balance for an address
     properties:
       balance:
@@ -10,53 +9,50 @@ definitions:
         example: 5
         type: integer
     type: object
-  cmd_server.BSV21BlockDataResponse:
+  main.BSV21BlockDataResponse:
     description: BSV21 transactions for a specific block
     properties:
       block:
-        $ref: '#/definitions/cmd_server.BlockHeaderResponse'
+        $ref: '#/definitions/main.BlockHeaderResponse'
       transactions:
         items:
           additionalProperties: true
           type: object
         type: array
     type: object
-  cmd_server.BSV21EventResponse:
+  main.BSV21EventResponse:
     description: BSV21 event data
     properties:
       data:
         additionalProperties: true
         type: object
       outpoint:
-        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127.0
         type: string
       score:
         example: 902578.000001234
         type: number
     type: object
-  cmd_server.BSV21TokenDetailsResponse:
+  main.BSV21TokenDetailsResponse:
     description: BSV21 token mint transaction details
     properties:
-      address:
-        example: 1Address...
+      amt:
+        example: "2100000000000000"
         type: string
-      amount:
-        example: 2100000000000000
-        type: integer
       dec:
         example: 0
         type: integer
       icon:
         example: https://example.com/token-icon.png
         type: string
+      id:
+        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+        type: string
       op:
         example: deploy+mint
         type: string
       sym:
         example: SHUA
-        type: string
-      tokenId:
-        example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
         type: string
       txid:
         example: ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127
@@ -65,7 +61,7 @@ definitions:
         example: 0
         type: integer
     type: object
-  cmd_server.BlockHeaderResponse:
+  main.BlockHeaderResponse:
     description: Bitcoin block header information
     properties:
       creationTimestamp:
@@ -93,7 +89,7 @@ definitions:
         example: 536870912
         type: integer
     type: object
-  cmd_server.ErrorResponse:
+  main.ErrorResponse:
     description: Error response returned by the API
     properties:
       message:
@@ -101,17 +97,7 @@ definitions:
         type: string
     type: object
 info:
-  contact:
-    email: support@swagger.io
-    name: API Support
-    url: http://www.swagger.io/support
-  description: Error response returned by the API
-  license:
-    name: Apache 2.0
-    url: http://www.apache.org/licenses/LICENSE-2.0.html
-  termsOfService: http://swagger.io/terms/
-  title: BSV21 Overlay API
-  version: "1.0"
+  contact: {}
 paths:
   /1sat/block/{height}:
     get:
@@ -130,15 +116,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/cmd_server.BlockHeaderResponse'
+            $ref: '#/definitions/main.BlockHeaderResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
       summary: Get block by height
       tags:
       - 1sat-blocks
@@ -153,11 +139,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/cmd_server.BlockHeaderResponse'
+            $ref: '#/definitions/main.BlockHeaderResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
       summary: Get current block tip
       tags:
       - 1sat-blocks
@@ -178,19 +164,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/cmd_server.BSV21TokenDetailsResponse'
+            $ref: '#/definitions/main.BSV21TokenDetailsResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
       summary: Get BSV21 token details
       tags:
       - 1sat-bsv21
@@ -221,11 +207,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/cmd_server.BSV21BalanceResponse'
+            $ref: '#/definitions/main.BSV21BalanceResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
       summary: Get BSV21 token balance
       tags:
       - 1sat-bsv21
@@ -252,15 +238,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/cmd_server.BSV21BlockDataResponse'
+            $ref: '#/definitions/main.BSV21BlockDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
       summary: Get BSV21 transactions for a block
       tags:
       - 1sat-bsv21
@@ -292,12 +278,12 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/cmd_server.BSV21EventResponse'
+              $ref: '#/definitions/main.BSV21EventResponse'
             type: array
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
       summary: Get all overlay events
       tags:
       - 1sat-events
@@ -328,12 +314,12 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/cmd_server.BSV21EventResponse'
+              $ref: '#/definitions/main.BSV21EventResponse'
             type: array
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
       summary: Get unspent overlay events
       tags:
       - 1sat-events
@@ -382,11 +368,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
       summary: ARC webhook for transaction status
       tags:
       - webhooks
@@ -409,16 +395,16 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/cmd_server.BSV21EventResponse'
+              $ref: '#/definitions/main.BSV21EventResponse'
             type: array
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
       summary: Query overlay events
       tags:
       - overlay
@@ -449,26 +435,12 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/cmd_server.ErrorResponse'
+            $ref: '#/definitions/main.ErrorResponse'
       summary: Submit tagged BEEF transaction
       tags:
       - overlay
-schemes:
-- http
-- https
 swagger: "2.0"
-tags:
-- description: BSV21 token-specific operations under the 1sat namespace
-  name: 1sat-bsv21
-- description: Blockchain block operations under the 1sat namespace
-  name: 1sat-blocks
-- description: Event querying and streaming under the 1sat namespace
-  name: 1sat-events
-- description: Core overlay service operations
-  name: overlay
-- description: Webhook endpoints for external integrations
-  name: webhooks

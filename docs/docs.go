@@ -9,16 +9,7 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "termsOfService": "http://swagger.io/terms/",
-        "contact": {
-            "name": "API Support",
-            "url": "http://www.swagger.io/support",
-            "email": "support@swagger.io"
-        },
-        "license": {
-            "name": "Apache 2.0",
-            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
-        },
+        "contact": {},
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
@@ -41,13 +32,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.BlockHeaderResponse"
+                            "$ref": "#/definitions/main.BlockHeaderResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -79,19 +70,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.BlockHeaderResponse"
+                            "$ref": "#/definitions/main.BlockHeaderResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -123,25 +114,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.BSV21TokenDetailsResponse"
+                            "$ref": "#/definitions/main.BSV21TokenDetailsResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -180,19 +171,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.BSV21BlockDataResponse"
+                            "$ref": "#/definitions/main.BSV21BlockDataResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -238,13 +229,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.BSV21BalanceResponse"
+                            "$ref": "#/definitions/main.BSV21BalanceResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -290,14 +281,14 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/cmd_server.BSV21EventResponse"
+                                "$ref": "#/definitions/main.BSV21EventResponse"
                             }
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -343,14 +334,14 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/cmd_server.BSV21EventResponse"
+                                "$ref": "#/definitions/main.BSV21EventResponse"
                             }
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -425,13 +416,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -467,20 +458,20 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/cmd_server.BSV21EventResponse"
+                                "$ref": "#/definitions/main.BSV21EventResponse"
                             }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -527,13 +518,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -541,7 +532,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "cmd_server.BSV21BalanceResponse": {
+        "main.BSV21BalanceResponse": {
             "description": "BSV21 token balance for an address",
             "type": "object",
             "properties": {
@@ -555,12 +546,12 @@ const docTemplate = `{
                 }
             }
         },
-        "cmd_server.BSV21BlockDataResponse": {
+        "main.BSV21BlockDataResponse": {
             "description": "BSV21 transactions for a specific block",
             "type": "object",
             "properties": {
                 "block": {
-                    "$ref": "#/definitions/cmd_server.BlockHeaderResponse"
+                    "$ref": "#/definitions/main.BlockHeaderResponse"
                 },
                 "transactions": {
                     "type": "array",
@@ -571,7 +562,7 @@ const docTemplate = `{
                 }
             }
         },
-        "cmd_server.BSV21EventResponse": {
+        "main.BSV21EventResponse": {
             "description": "BSV21 event data",
             "type": "object",
             "properties": {
@@ -581,7 +572,7 @@ const docTemplate = `{
                 },
                 "outpoint": {
                     "type": "string",
-                    "example": "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"
+                    "example": "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127.0"
                 },
                 "score": {
                     "type": "number",
@@ -589,17 +580,13 @@ const docTemplate = `{
                 }
             }
         },
-        "cmd_server.BSV21TokenDetailsResponse": {
+        "main.BSV21TokenDetailsResponse": {
             "description": "BSV21 token mint transaction details",
             "type": "object",
             "properties": {
-                "address": {
+                "amt": {
                     "type": "string",
-                    "example": "1Address..."
-                },
-                "amount": {
-                    "type": "integer",
-                    "example": 2100000000000000
+                    "example": "2100000000000000"
                 },
                 "dec": {
                     "type": "integer",
@@ -609,6 +596,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "https://example.com/token-icon.png"
                 },
+                "id": {
+                    "type": "string",
+                    "example": "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"
+                },
                 "op": {
                     "type": "string",
                     "example": "deploy+mint"
@@ -616,10 +607,6 @@ const docTemplate = `{
                 "sym": {
                     "type": "string",
                     "example": "SHUA"
-                },
-                "tokenId": {
-                    "type": "string",
-                    "example": "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"
                 },
                 "txid": {
                     "type": "string",
@@ -631,7 +618,7 @@ const docTemplate = `{
                 }
             }
         },
-        "cmd_server.BlockHeaderResponse": {
+        "main.BlockHeaderResponse": {
             "description": "Bitcoin block header information",
             "type": "object",
             "properties": {
@@ -669,7 +656,7 @@ const docTemplate = `{
                 }
             }
         },
-        "cmd_server.ErrorResponse": {
+        "main.ErrorResponse": {
             "description": "Error response returned by the API",
             "type": "object",
             "properties": {
@@ -679,39 +666,17 @@ const docTemplate = `{
                 }
             }
         }
-    },
-    "tags": [
-        {
-            "description": "BSV21 token-specific operations under the 1sat namespace",
-            "name": "1sat-bsv21"
-        },
-        {
-            "description": "Blockchain block operations under the 1sat namespace",
-            "name": "1sat-blocks"
-        },
-        {
-            "description": "Event querying and streaming under the 1sat namespace",
-            "name": "1sat-events"
-        },
-        {
-            "description": "Core overlay service operations",
-            "name": "overlay"
-        },
-        {
-            "description": "Webhook endpoints for external integrations",
-            "name": "webhooks"
-        }
-    ]
+    }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0",
+	Version:          "",
 	Host:             "",
-	BasePath:         "/",
-	Schemes:          []string{"http", "https"},
-	Title:            "BSV21 Overlay API",
-	Description:      "Error response returned by the API",
+	BasePath:         "",
+	Schemes:          []string{},
+	Title:            "",
+	Description:      "",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

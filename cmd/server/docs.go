@@ -38,7 +38,7 @@ import (
 // BSV21EventResponse represents an event response
 // @Description BSV21 event data
 type BSV21EventResponse struct {
-	Outpoint string                 `json:"outpoint" example:"ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"`
+	Outpoint string                 `json:"outpoint" example:"ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127.0"`
 	Score    float64                `json:"score" example:"902578.000001234"`
 	Data     map[string]interface{} `json:"data,omitempty"`
 }
@@ -73,15 +73,14 @@ type BSV21BlockDataResponse struct {
 // BSV21TokenDetailsResponse represents token mint details
 // @Description BSV21 token mint transaction details
 type BSV21TokenDetailsResponse struct {
-	TokenID string  `json:"tokenId" example:"ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"`
-	TxID    string  `json:"txid" example:"ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127"`
-	Vout    uint32  `json:"vout" example:"0"`
-	Op      string  `json:"op" example:"deploy+mint"`
-	Sym     string  `json:"sym,omitempty" example:"SHUA"`
-	Dec     uint8   `json:"dec,omitempty" example:"0"`
-	Icon    string  `json:"icon,omitempty" example:"https://example.com/token-icon.png"`
-	Amount  uint64  `json:"amount" example:"2100000000000000"`
-	Address string  `json:"address,omitempty" example:"1Address..."`
+	ID   string `json:"id" example:"ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"`
+	TxID string `json:"txid" example:"ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127"`
+	Vout uint32 `json:"vout" example:"0"`
+	Op   string `json:"op" example:"deploy+mint"`
+	Amt  string `json:"amt" example:"2100000000000000"`
+	Sym  string `json:"sym,omitempty" example:"SHUA"`
+	Dec  uint8  `json:"dec,omitempty" example:"0"`
+	Icon string `json:"icon,omitempty" example:"https://example.com/token-icon.png"`
 }
 
 // ErrorResponse represents an error response
