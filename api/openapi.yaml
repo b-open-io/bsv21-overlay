@@ -1,0 +1,983 @@
+openapi: 3.0.3
+info:
+  title: BSV21 Overlay API
+  description: |
+    API for BSV21 token transactions, providing real-time event streaming, lookups, and SPV validation.
+    
+    This service combines BSV21-specific operations with core overlay service functionality.
+  version: 1.0.0
+  contact:
+    name: API Support
+    url: https://github.com/b-open-io/bsv21-overlay
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: /
+
+tags:
+  - name: 1sat-bsv21
+    description: BSV21 token-specific operations under the 1sat namespace
+  - name: 1sat-blocks
+    description: Blockchain block operations under the 1sat namespace
+  - name: 1sat-events
+    description: Event querying and streaming under the 1sat namespace
+  - name: overlay-services
+    description: Core overlay service operations
+
+paths:
+  # BSV21-specific routes
+  /1sat/events/{event}:
+    get:
+      tags:
+        - 1sat-events
+      summary: Query events by type
+      description: Returns all outputs matching the specified event type
+      parameters:
+        - name: event
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Event type to query (e.g., "bsv21:tokenId", "p2pkh:address")
+        - name: from
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Starting score for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of results to return
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BSV21EventResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /1sat/events/{event}/unspent:
+    get:
+      tags:
+        - 1sat-events
+      summary: Query unspent events by type
+      description: Returns only unspent outputs matching the specified event type
+      parameters:
+        - name: event
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Event type to query
+        - name: from
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Starting score for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of results to return
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BSV21EventResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /1sat/bsv21/{tokenId}:
+    get:
+      tags:
+        - 1sat-bsv21
+      summary: Get token events
+      description: Returns all events for a specific BSV21 token
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Token ID to query
+        - name: from
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Starting score for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of results to return
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BSV21EventResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /1sat/bsv21/{tokenId}/block/{height}:
+    get:
+      tags:
+        - 1sat-bsv21
+      summary: Get token transactions at block height
+      description: Returns all BSV21 token transactions at a specific block height
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Token ID to query
+        - name: height
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Block height to query
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TransactionData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /1sat/bsv21/{tokenId}/{lockType}/{address}/balance:
+    get:
+      tags:
+        - 1sat-bsv21
+      summary: Get token balance for address
+      description: Returns the BSV21 token balance for a specific address and lock type
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Token ID
+        - name: lockType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [p2pkh, ltm, pow20]
+          description: Lock type
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Address to query balance for
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BSV21BalanceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /1sat/bsv21/{tokenId}/{lockType}/balance:
+    post:
+      tags:
+        - 1sat-bsv21
+      summary: Get token balances for multiple addresses
+      description: Returns BSV21 token balances for multiple addresses of a specific lock type
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Token ID
+        - name: lockType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [p2pkh, ltm, pow20]
+          description: Lock type
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                addresses:
+                  type: array
+                  items:
+                    type: string
+                  description: List of addresses to query
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/BSV21BalanceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /1sat/block/tip:
+    get:
+      tags:
+        - 1sat-blocks
+      summary: Get current block tip
+      description: Returns the current blockchain tip information
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockHeader'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /1sat/block/{height}:
+    get:
+      tags:
+        - 1sat-blocks
+      summary: Get block by height
+      description: Returns block information for a specific height
+      parameters:
+        - name: height
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Block height
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockHeader'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /1sat/subscribe/{topics}:
+    get:
+      tags:
+        - 1sat-events
+      summary: Subscribe to real-time events
+      description: Server-sent events stream for real-time BSV21 events
+      parameters:
+        - name: topics
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Comma-separated list of topics to subscribe to
+      responses:
+        '200':
+          description: Server-sent event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE stream of events
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # Core overlay service routes
+  /api/v1/listLookupServiceProviders:
+    get:
+      tags:
+        - overlay-services
+      operationId: ListLookupServiceProviders
+      security:
+        - bearerAuth:
+            - user
+      responses:
+        '200':
+          description: A list of services with their metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Metadata'
+
+  /api/v1/listTopicManagers:
+    get:
+      tags:
+        - overlay-services
+      operationId: ListTopicManagers
+      security:
+        - bearerAuth:
+            - user
+      responses:
+        '200':
+          description: A list of services with their metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Metadata'
+
+  /api/v1/getDocumentationForLookupServiceProvider:
+    get:
+      tags:
+        - overlay-services
+      operationId: GetLookupServiceProviderDocumentation
+      security:
+        - bearerAuth:
+            - user
+      parameters:
+        - in: query
+          name: lookupService
+          schema:
+            type: string
+          required: true
+          description: The name of the lookup service provider to retrieve documentation for
+      responses:
+        '200':
+          description: Returns the documentation for the specified lookup service
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupServiceDocumentation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/getDocumentationForTopicManager:
+    get:
+      tags:
+        - overlay-services
+      operationId: GetTopicManagerDocumentation
+      security:
+        - bearerAuth:
+            - user
+      parameters:
+        - in: query
+          name: topicManager
+          schema:
+            type: string
+          required: true
+          description: The name of the topic manager to retrieve documentation for
+      responses:
+        '200':
+          description: Returns the documentation for the specified topic manager
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopicManagerDocumentation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/submit:
+    post:
+      tags:
+        - overlay-services
+      operationId: SubmitTransaction
+      security:
+        - bearerAuth:
+            - user
+      parameters:
+        - in: header
+          name: x-topics
+          schema:
+            type: array
+            items:
+              type: string
+          required: true
+          explode: true
+          style: simple
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: object
+              properties:
+                Transaction:
+                  type: string
+                  format: binary
+                  description: 'Serialized transaction data (e.g., a binary format such as Protobuf or other)'
+              required:
+                - Transaction
+      responses:
+        '200':
+          description: Overlay engine successfully processed the submitted transaction octet-stream with the specified topic headers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitTransaction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '409':
+          $ref: '#/components/responses/RequestTimeout'
+
+  /api/v1/requestSyncResponse:
+    post:
+      tags:
+        - overlay-services
+      operationId: RequestSyncResponse
+      security:
+        - bearerAuth:
+            - user
+      parameters:
+        - in: header
+          name: X-BSV-Topic
+          schema:
+            type: string
+          required: true
+          description: Topic identifier for the sync response request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version:
+                  type: integer
+                  description: 'The version number of the GASP protocol'
+                since:
+                  type: number
+                  format: double
+                  description: 'Timestamp or sequence number from which to start synchronization'
+              required:
+                - version
+                - since
+      responses:
+        '200':
+          description: Response containing synchronization data for the requested topic.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestSyncRes'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/requestForeignGASPNode:
+    post:
+      tags:
+        - overlay-services
+      operationId: RequestForeignGASPNode
+      security:
+        - bearerAuth:
+            - user
+      parameters:
+        - in: header
+          name: X-BSV-Topic
+          schema:
+            type: string
+          required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - graphID
+                - txID
+                - outputIndex
+              properties:
+                graphID:
+                  type: string
+                  description: The graph ID in the format of "txID.outputIndex"
+                  example: "0000000000000000000000000000000000000000000000000000000000000000.1"
+                txID:
+                  type: string
+                  description: The transaction ID
+                  example: "0000000000000000000000000000000000000000000000000000000000000000"
+                outputIndex:
+                  type: integer
+                  description: The output index
+                  format: uint32
+                  example: 1
+      responses:
+        '200':
+          description: Overlay engine successfully provided the requested foreign GASP node.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GASPNode'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/lookup:
+    post:
+      tags:
+        - overlay-services
+      operationId: LookupQuestion
+      security:
+        - bearerAuth:
+            - user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                service:
+                  type: string
+                  description: 'Service name to query'
+                query:
+                  type: object
+                  description: 'Query parameters specific to the service'
+                  additionalProperties: true
+              required:
+                - service
+                - query
+      responses:
+        '200':
+          description: Overlay engine successfully processed the lookup question and returned an answer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupAnswer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/arc-ingest:
+    post:
+      tags:
+        - overlay-services
+      operationId: ArcIngest
+      security:
+        - bearerAuth:
+            - user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                txid:
+                  type: string
+                  description: 'Transaction ID in hexadecimal format'
+                merklePath:
+                  type: string
+                  description: 'Merkle path in hexadecimal format'
+                blockHeight:
+                  type: integer
+                  format: uint32
+                  description: 'Block height where the transaction was included'
+              required:
+                - txid
+                - merklePath
+                - blockHeight
+      responses:
+        '200':
+          description: Merkle proof successfully processed and transaction status updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcIngest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '408':
+          $ref: '#/components/responses/RequestTimeout'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  schemas:
+    # BSV21-specific schemas
+    BSV21EventResponse:
+      type: object
+      properties:
+        outpoint:
+          type: string
+          example: "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127.0"
+          description: Transaction outpoint (txid.vout)
+        score:
+          type: number
+          format: float
+          example: 902578.000001234
+          description: Event score for ordering/pagination
+        data:
+          type: object
+          additionalProperties: true
+          description: Event-specific data
+
+    BSV21BalanceResponse:
+      type: object
+      properties:
+        balance:
+          type: integer
+          format: int64
+          example: 1000000
+          description: Token balance
+        utxoCount:
+          type: integer
+          example: 5
+          description: Number of UTXOs
+
+    TransactionData:
+      type: object
+      properties:
+        txid:
+          type: string
+          description: Transaction ID
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutputData'
+        outputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutputData'
+
+    OutputData:
+      type: object
+      properties:
+        txid:
+          type: string
+          description: Source transaction ID (only for inputs)
+        vout:
+          type: integer
+          description: Output index
+        data:
+          type: object
+          additionalProperties: true
+          description: Protocol-specific data
+        script:
+          type: string
+          format: byte
+          description: Locking script
+        satoshis:
+          type: integer
+          format: int64
+          description: Output value in satoshis
+
+    BlockHeader:
+      type: object
+      properties:
+        height:
+          type: integer
+          description: Block height
+        hash:
+          type: string
+          description: Block hash
+        prevHash:
+          type: string
+          description: Previous block hash
+        merkleRoot:
+          type: string
+          description: Merkle root
+        timestamp:
+          type: integer
+          format: int64
+          description: Block timestamp
+        bits:
+          type: integer
+          description: Difficulty bits
+        nonce:
+          type: integer
+          description: Nonce
+
+    # Overlay service schemas
+    AdmittanceInstructions:
+      type: object
+      properties:
+        outputsToAdmit:
+          type: array
+          items:
+            type: integer
+            format: uint32
+        coinsToRetain:
+          type: array
+          items:
+            type: integer
+            format: uint32
+        coinsRemoved:
+          type: array
+          items:
+            type: integer
+            format: uint32
+        ancillaryTxIDs:
+          type: array
+          items:
+            type: string
+      required:
+        - outputsToAdmit
+        - coinsToRetain
+        - coinsRemoved
+        - ancillaryTxIDs
+
+    STEAK:
+      type: object
+      additionalProperties:
+        $ref: "#/components/schemas/AdmittanceInstructions"
+
+    SubmitTransaction:
+      type: object
+      properties:
+        STEAK:
+          $ref: "#/components/schemas/STEAK"
+      required:
+        - STEAK
+
+    ServiceMetadata:
+      type: object
+      properties:
+        name:
+          type: string
+        shortDescription:
+          type: string
+        iconURL:
+          type: string
+        version:
+          type: string
+        informationURL:
+          type: string
+      required:
+        - name
+        - shortDescription
+        - iconURL
+        - version
+        - informationURL
+
+    Metadata:
+      type: object
+      additionalProperties:
+        $ref: "#/components/schemas/ServiceMetadata"
+
+    TopicManagerDocumentation:
+      type: object
+      properties:
+        documentation:
+          type: string
+          description: Markdown-formatted documentation for the topic manager
+      required:
+        - documentation
+
+    LookupServiceDocumentation:
+      type: object
+      properties:
+        documentation:
+          type: string
+          description: Markdown-formatted documentation for the lookup service
+      required:
+        - documentation
+
+    OutputListItem:
+      type: object
+      properties:
+        beef:
+          type: string
+          format: byte
+        outputIndex:
+          type: integer
+          format: uint32
+      required:
+        - beef
+        - outputIndex
+
+    LookupAnswer:
+      type: object
+      properties:
+        type:
+          type: string
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutputListItem"
+        result:
+          type: string
+      required:
+        - type
+        - outputs
+        - result
+
+    GASPNode:
+      type: object
+      description: A GASP node representation from the overlay engine
+      properties:
+        graphID:
+          type: string
+          description: The graph ID of the GASP node
+        rawTx:
+          type: string
+          description: The raw transaction of the GASP node
+        outputIndex:
+          type: integer
+          format: uint32
+          description: The output index of the GASP node
+        proof:
+          type: string
+          description: The proof of the GASP node
+        txMetadata:
+          type: string
+          description: The metadata of the GASP node
+        outputMetadata:
+          type: string
+          description: The metadata of the GASP node
+        inputs:
+          type: object
+          description: The inputs of the GASP node
+        ancillaryBeef:
+          type: string
+          format: byte
+          description: The ancillary beef of the GASP node
+      required:
+        - graphID
+        - rawTx
+        - outputIndex
+        - proof
+        - txMetadata
+        - outputMetadata
+        - inputs
+        - ancillaryBeef
+
+    UTXOItem:
+      type: object
+      properties:
+        txid:
+          type: string
+          description: 'Transaction ID in hexadecimal format'
+        outputIndex:
+          type: integer
+          description: 'Output index number'
+        score:
+          type: number
+          format: double
+          description: 'Sort score of the UTXO, used for prioritization in synchronization'
+      required:
+        - txid
+        - outputIndex
+        - score
+
+    RequestSyncRes:
+      type: object
+      properties:
+        UTXOList:
+          type: array
+          items:
+            $ref: "#/components/schemas/UTXOItem"
+        since:
+          type: number
+          format: double
+          description: 'Timestamp or sequence number from which synchronization data was generated'
+      required:
+        - UTXOList
+        - since
+
+    ArcIngest:
+      type: object
+      properties:
+        status:
+          type: string
+          example: 'success'
+        message:
+          type: string
+          example: 'Transaction with ID:0000000000000000000000000000000000000000000000000000000000000000 successfully ingested.'
+      required:
+        - status
+        - message
+
+    Error:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Human-readable error message
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  responses:
+    BadRequest:
+      description: |
+        The server cannot process the request due to malformed syntax or invalid input.
+        This error is typically caused by client-side issues, such as missing required parameters,
+        invalid data formats, or incorrect request structures.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: |
+        The requested resource could not be found. This error occurs when the client
+        requests an endpoint or resource that does not exist on the server or cannot be located.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    InternalServerError:
+      description: |
+        An unexpected condition was encountered on the server, causing the request to fail.
+        This error is typically caused by internal issues such as server misconfigurations,
+        database failures, or unhandled exceptions.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    RequestTimeout:
+      description: |
+        The server did not receive a complete request within the time it was prepared to wait.
+        This error can occur if the client's request takes too long to process or there is network latency.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

@@ -51,7 +51,7 @@ func init() {
 		ApiKey: os.Getenv("BLOCK_HEADERS_API_KEY"),
 	}
 	PORT, _ = strconv.Atoi(os.Getenv("PORT"))
-	
+
 	// Define command-line flags
 	flag.IntVar(&PORT, "p", PORT, "Port to listen on")
 	flag.BoolVar(&SYNC, "s", false, "Start sync")
@@ -222,12 +222,12 @@ func main() {
 
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
-		EnablePrintRoutes: true, // Set this to true to print routes
+		// EnablePrintRoutes: true, // Set this to true to print routes
 	})
 	app.Use(logger.New())
 
-	// Setup Swagger documentation
-	setupSwagger(app)
+	// Setup OpenAPI documentation
+	setupOpenAPIDocumentation(app)
 
 	onesat := app.Group("/1sat")
 
