@@ -12,18 +12,26 @@ func setupOpenAPIDocumentation(app *fiber.App) {
 		return c.SendFile("./api/openapi.yaml")
 	})
 	
-	// Serve the Swagger UI HTML page
+	// Serve the Swagger UI HTML page at /api/docs
+	app.Get("/api/docs", func(c *fiber.Ctx) error {
+		return c.SendFile("./api/swagger-ui.html")
+	})
+	
+	// Redirect /api/docs/ to /api/docs
+	app.Get("/api/docs/", func(c *fiber.Ctx) error {
+		return c.Redirect("/api/docs")
+	})
+	
+	// Legacy redirects for backwards compatibility
 	app.Get("/swagger", func(c *fiber.Ctx) error {
-		return c.SendFile("./api/swagger-ui.html")
+		return c.Redirect("/api/docs")
 	})
 	
-	// Redirect /swagger/ to /swagger
 	app.Get("/swagger/", func(c *fiber.Ctx) error {
-		return c.Redirect("/swagger")
+		return c.Redirect("/api/docs")
 	})
 	
-	// Serve the OpenAPI spec at /docs as well for compatibility
 	app.Get("/docs", func(c *fiber.Ctx) error {
-		return c.SendFile("./api/swagger-ui.html")
+		return c.Redirect("/api/docs")
 	})
 }

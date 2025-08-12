@@ -28,7 +28,7 @@ tags:
 
 paths:
   # BSV21-specific routes
-  /1sat/events/{event}:
+  /api/1sat/events/{event}:
     get:
       tags:
         - 1sat-events
@@ -67,7 +67,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /1sat/events/{event}/unspent:
+  /api/1sat/events/{event}/unspent:
     get:
       tags:
         - 1sat-events
@@ -106,7 +106,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /1sat/bsv21/{tokenId}:
+  /api/1sat/bsv21/{tokenId}:
     get:
       tags:
         - 1sat-bsv21
@@ -145,7 +145,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /1sat/bsv21/{tokenId}/block/{height}:
+  /api/1sat/bsv21/{tokenId}/block/{height}:
     get:
       tags:
         - 1sat-bsv21
@@ -178,7 +178,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /1sat/bsv21/{tokenId}/{lockType}/{address}/balance:
+  /api/1sat/bsv21/{tokenId}/{lockType}/{address}/balance:
     get:
       tags:
         - 1sat-bsv21
@@ -216,7 +216,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /1sat/bsv21/{tokenId}/{lockType}/balance:
+  /api/1sat/bsv21/{tokenId}/{lockType}/balance:
     post:
       tags:
         - 1sat-bsv21
@@ -262,7 +262,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /1sat/block/tip:
+  /api/1sat/block/tip:
     get:
       tags:
         - 1sat-blocks
@@ -278,7 +278,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /1sat/block/{height}:
+  /api/1sat/block/{height}:
     get:
       tags:
         - 1sat-blocks
@@ -303,7 +303,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /1sat/subscribe/{topics}:
+  /api/1sat/subscribe/{topics}:
     get:
       tags:
         - 1sat-events

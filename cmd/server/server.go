@@ -229,7 +229,7 @@ func main() {
 	// Setup OpenAPI documentation
 	setupOpenAPIDocumentation(app)
 
-	onesat := app.Group("/1sat")
+	onesat := app.Group("/api/1sat")
 
 	// Common handler for parsing event query parameters
 	parseEventQuery := func(c *fiber.Ctx) *storage.EventQuestion {
