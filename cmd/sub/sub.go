@@ -47,11 +47,11 @@ func main() {
 
 	// Set up Redis connection for queue management
 	// Note: sub command uses Redis directly for queue operations
-	queueURL := os.Getenv("QUEUE_URL")
-	if queueURL == "" {
-		queueURL = "redis://localhost:6379"
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
 	}
-	opts, err := redis.ParseURL(queueURL)
+	opts, err := redis.ParseURL(redisURL)
 	if err != nil {
 		log.Fatalf("Failed to parse Redis URL: %v", err)
 	}
