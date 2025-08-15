@@ -61,13 +61,14 @@ type tokenSummary struct {
 
 var (
 	// Configuration from flags/env
-	eventsURL string
-	beefURL   string
-	redisURL  string
-	envFile   string
+	eventsURL    string
+	beefURL      string
+	redisURL     string
+	junglebusURL string
+	envFile      string
 	
 	// Debug flags to control which components run
-	runJungleBus     bool
+	runJunglebus     bool
 	runQueueProc     bool
 	runTokenProc     bool
 	queueConcurrency int
@@ -84,9 +85,10 @@ func init() {
 	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
 	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
 	flag.StringVar(&redisURL, "redis", os.Getenv("REDIS_URL"), "Redis URL for pub/sub and queues")
+	flag.StringVar(&junglebusURL, "junglebus", os.Getenv("JUNGLEBUS_URL"), "Junglebus URL")
 	
 	// Debug flags to enable/disable components
-	flag.BoolVar(&runJungleBus, "jb", true, "Enable JungleBus subscriber")
+	flag.BoolVar(&runJunglebus, "jb", true, "Enable Junglebus subscriber")
 	flag.BoolVar(&runQueueProc, "queue", true, "Enable queue processor")
 	flag.BoolVar(&runTokenProc, "token", true, "Enable token processor")
 	flag.IntVar(&queueConcurrency, "qlimit", 16, "Queue processor concurrency")
@@ -150,23 +152,28 @@ func main() {
 		if flag.Lookup("redis").Value.String() == "" {
 			redisURL = os.Getenv("REDIS_URL")
 		}
+		if flag.Lookup("junglebus").Value.String() == "" {
+			junglebusURL = os.Getenv("JUNGLEBUS_URL")
+		}
+	}
+	
+	// Apply default for Junglebus URL if not set
+	if junglebusURL == "" {
+		junglebusURL = "https://junglebus.gorillapool.io"
 	}
 	
 	// Validate required configuration
-	if runJungleBus && topicID == "" {
-		log.Fatal("Topic ID is required when JungleBus is enabled. Use -topic flag or set BSV21_TOPIC environment variable")
+	if runJunglebus && topicID == "" {
+		log.Fatal("Topic ID is required when Junglebus is enabled. Use -topic flag or set BSV21_TOPIC environment variable")
 	}
 	
-	// Set up JungleBus connection if enabled
-	if runJungleBus {
-		jungleBusURL := os.Getenv("JUNGLEBUS_URL")
-		if jungleBusURL == "" {
-			log.Fatal("JUNGLEBUS_URL environment variable is required when JungleBus is enabled")
-		}
+	// Set up Junglebus connection if enabled
+	if runJunglebus {
+		log.Printf("Connecting to Junglebus at: %s", junglebusURL)
 		var err error
-		jbClient, err = junglebus.New(junglebus.WithHTTP(jungleBusURL))
+		jbClient, err = junglebus.New(junglebus.WithHTTP(junglebusURL))
 		if err != nil {
-			log.Fatalf("Failed to create JungleBus client: %v", err)
+			log.Fatalf("Failed to create Junglebus client: %v", err)
 		}
 	}
 	
@@ -201,7 +208,7 @@ func main() {
 
 	// Log configuration
 	log.Printf("Starting jbsync with configuration:")
-	log.Printf("  JungleBus: %v", runJungleBus)
+	log.Printf("  Junglebus: %v", runJunglebus)
 	log.Printf("  Queue Processor: %v (concurrency: %d)", runQueueProc, queueConcurrency)
 	log.Printf("  Token Processor: %v (concurrency: %d)", runTokenProc, tokenConcurrency)
 
@@ -236,17 +243,17 @@ func main() {
 		log.Println("Token processor disabled")
 	}
 
-	// Conditionally start JungleBus subscription
-	if runJungleBus {
+	// Conditionally start Junglebus subscription
+	if runJunglebus {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := jungleBusSubscriber(ctx); err != nil {
-				log.Printf("JungleBus subscriber error: %v", err)
+			if err := junglebusSubscriber(ctx); err != nil {
+				log.Printf("Junglebus subscriber error: %v", err)
 			}
 		}()
 	} else {
-		log.Println("JungleBus subscriber disabled")
+		log.Println("Junglebus subscriber disabled")
 	}
 
 	// Wait for all goroutines to finish
@@ -258,8 +265,8 @@ func main() {
 	log.Println("Shutdown complete")
 }
 
-// jungleBusSubscriber handles JungleBus subscription (Stage 1)
-func jungleBusSubscriber(ctx context.Context) error {
+// junglebusSubscriber handles Junglebus subscription (Stage 1)
+func junglebusSubscriber(ctx context.Context) error {
 	// Check for existing progress using sorted set
 	startBlock := fromBlock
 	if progress, err := redisClient.ZScore(ctx, "progress", topicID).Result(); err == nil && progress > 0 {
@@ -268,7 +275,7 @@ func jungleBusSubscriber(ctx context.Context) error {
 	}
 
 	txcount := 0
-	log.Printf("Starting JungleBus subscription for topic: %s from block %d", topicID, startBlock)
+	log.Printf("Starting Junglebus subscription for topic: %s from block %d", topicID, startBlock)
 
 	// Create subscription
 	sub, err := jbClient.SubscribeWithQueue(ctx,
