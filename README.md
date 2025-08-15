@@ -74,8 +74,8 @@ export BEEF_STORAGE='["lru://1gb", "redis://localhost:6379", "junglebus://"]'  #
 # OR
 export BEEF_STORAGE="lru://100mb,redis://localhost:6379,junglebus://"         # Comma-separated
 
-# Publisher Configuration (Required)
-export PUBLISHER_URL=redis://localhost:6379           # Publisher for pub/sub
+# Publisher Configuration (Optional - needed for real-time events)
+export PUBLISHER_URL=redis://localhost:6379           # Publisher for pub/sub (optional)
 
 # Service Configuration
 export PORT=3000
@@ -393,7 +393,7 @@ Stores processed BSV21 events with indexing for efficient queries.
 - **Redis** (`redis://...`): High-performance in-memory event storage
 - **SQLite** (`./overlay.db`): Lightweight file-based storage for single-node deployments
 
-Note: `PUBLISHER_URL` is always required for the publisher (pub/sub functionality).
+Note: `PUBLISHER_URL` is optional. If not provided, the service won't publish real-time events but will still function normally for storage and queries.
 
 ### Event Value Storage
 
