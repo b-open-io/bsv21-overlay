@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"math"
 	"os"
 	"os/signal"
 	"sync"
@@ -22,10 +21,12 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/redis/go-redis/v9"
 )
 
 var eventStorage storage.EventDataStorage
 var chaintracker *headers_client.Client
+var redisClient *redis.Client
 
 type tokenSummary struct {
 	tx   int
@@ -41,6 +42,12 @@ func init() {
 	eventStorage, err = config.CreateEventStorage("", "", "")
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
+	}
+	
+	// Get Redis client for direct operations
+	redisClient = eventStorage.GetRedisClient()
+	if redisClient == nil {
+		log.Fatal("Redis client is required for BSV21 overlay operations")
 	}
 
 	// Set up chain tracker
@@ -67,7 +74,7 @@ func main() {
 	const whitelistKey = "bsv21:whitelist"
 
 	// Log current whitelist
-	if tokens, err := eventStorage.SMembers(ctx, whitelistKey); err == nil {
+	if tokens, err := redisClient.SMembers(ctx, whitelistKey).Result(); err == nil {
 		log.Printf("Token whitelist: %v", tokens)
 	} else {
 		log.Printf("Failed to get token whitelist: %v", err)
@@ -120,7 +127,7 @@ func main() {
 		}
 
 		// Get whitelisted tokens
-		whitelistedTokens, err := eventStorage.SMembers(ctx, whitelistKey)
+		whitelistedTokens, err := redisClient.SMembers(ctx, whitelistKey).Result()
 		if err != nil {
 			log.Printf("Failed to get whitelisted tokens: %v", err)
 			time.Sleep(5 * time.Second)
@@ -135,7 +142,12 @@ func main() {
 			key := "tok:" + tokenId
 
 			// Check if this token has any transactions to process
-			members, err := eventStorage.ZRange(ctx, key, -math.MaxFloat64, math.MaxFloat64, 0, 1)
+			members, err := redisClient.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
+				Min:    "-inf",
+				Max:    "+inf",
+				Offset: 0,
+				Count:  1,
+			}).Result()
 			if err != nil {
 				log.Printf("Failed to check existence of key %s: %v", key, err)
 				continue
@@ -181,14 +193,17 @@ func main() {
 					}
 
 					// start := time.Now()
-					members, err := eventStorage.ZRange(ctx, key, -math.MaxFloat64, math.MaxFloat64, 0, 0)
+					members, err := redisClient.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
+						Min: "-inf",
+						Max: "+inf",
+					}).Result()
 					if err != nil {
 						log.Fatalf("Failed to query Redis: %v", err)
 					}
 					// log.Println("Processing tokenId", parts[1], len(members), "txids")
 					logTime := time.Now()
 					for _, member := range members {
-						txidStr := member.Member
+						txidStr := member.Member.(string)
 						select {
 						case <-ctx.Done():
 							log.Println("Context canceled, stopping processing...")
@@ -227,7 +242,7 @@ func main() {
 								} else {
 									// log.Println("Submitted generated", tx.TxID().String(), "in", time.Since(logTime))
 									// logTime = time.Now()
-									if err := eventStorage.ZRem(ctx, key, txidStr); err != nil {
+									if err := redisClient.ZRem(ctx, key, txidStr).Err(); err != nil {
 										log.Fatalf("Failed to delete from queue: %v", err)
 									}
 									log.Println("Processed", txid, "in", time.Since(logTime), "as", admit[tm].OutputsToAdmit)

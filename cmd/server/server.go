@@ -16,8 +16,8 @@ import (
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/config"
-	"github.com/b-open-io/overlay/publish"
 	"github.com/b-open-io/overlay/storage"
+	"github.com/redis/go-redis/v9"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
 	"github.com/bsv-blockchain/go-sdk/transaction"
@@ -31,7 +31,7 @@ import (
 var chaintracker *headers_client.Client
 var PORT int
 var SYNC bool
-var pubsub publish.PubSub  // PubSub interface instead of direct Redis
+var redisClient *redis.Client  // Redis client for pub/sub and queue operations
 var topicClients = make(map[string][]*bufio.Writer) // Map of topic to connected clients
 var topicClientsMutex = &sync.Mutex{}               // Mutex to protect topicClients
 var peers = []string{}
@@ -41,7 +41,7 @@ var e *engine.Engine
 var (
 	eventsURL string
 	beefURL   string
-	pubsubURL string
+	redisURL  string
 )
 
 func init() {
@@ -61,7 +61,7 @@ func init() {
 	flag.BoolVar(&SYNC, "s", false, "Start sync")
 	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
 	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
-	flag.StringVar(&pubsubURL, "pubsub", os.Getenv("PUBSUB_URL"), "PubSub URL for events")
+	flag.StringVar(&redisURL, "redis", os.Getenv("REDIS_URL"), "Redis URL for pub/sub and queues")
 	flag.Parse()
 	// Apply defaults
 	if PORT == 0 {
@@ -71,12 +71,18 @@ func init() {
 		beefURL = "./beef_storage"
 	}
 	
-	// Set up PubSub client (if URL is provided)
-	if pubsubURL != "" {
-		var err error
-		pubsub, err = publish.NewRedisPubSub(pubsubURL)
+	// Set up Redis client (if URL is provided)
+	if redisURL != "" {
+		opts, err := redis.ParseURL(redisURL)
 		if err != nil {
-			log.Fatalf("Failed to create PubSub client: %v", err)
+			log.Fatalf("Failed to parse Redis URL: %v", err)
+		}
+		redisClient = redis.NewClient(opts)
+		
+		// Test connection
+		ctx := context.Background()
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			log.Fatalf("Failed to connect to Redis: %v", err)
 		}
 	}
 	PEERS := os.Getenv("PEERS")
@@ -87,17 +93,16 @@ func init() {
 
 // broadcastMessages handles real-time event broadcasting
 func broadcastMessages(ctx context.Context) {
-	if pubsub == nil {
-		log.Println("No PubSub configured, real-time broadcasting disabled")
+	if redisClient == nil {
+		log.Println("No Redis configured, real-time broadcasting disabled")
 		return
 	}
 	
 	// Subscribe to all channels
-	msgChan, err := pubsub.PSubscribe(ctx, "*")
-	if err != nil {
-		log.Printf("Failed to subscribe to events: %v", err)
-		return
-	}
+	pubsub := redisClient.PSubscribe(ctx, "*")
+	defer pubsub.Close()
+	
+	msgChan := pubsub.Channel()
 	
 	for {
 		select {
@@ -145,9 +150,9 @@ func main() {
 		log.Println("Shutting down server...")
 		cancel()
 
-		// Close PubSub connection
-		if pubsub != nil {
-			pubsub.Close()
+		// Close Redis connection
+		if redisClient != nil {
+			redisClient.Close()
 		}
 
 		// Close storage and lookup services
@@ -174,7 +179,7 @@ func main() {
 
 	// Create storage using the cleaned up configuration
 	var err error
-	store, err = config.CreateEventStorage(eventsURL, beefURL, pubsubURL)
+	store, err = config.CreateEventStorage(eventsURL, beefURL, redisURL)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
@@ -183,6 +188,14 @@ func main() {
 	bsv21Lookup, err = lookups.NewBsv21EventsLookup(store)
 	if err != nil {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
+	}
+	
+	// Get Redis client from storage if we don't already have one
+	if redisClient == nil {
+		redisClient = store.GetRedisClient()
+		if redisClient == nil {
+			log.Fatal("Redis client is required for BSV21 overlay operations")
+		}
 	}
 
 	// Initialize engine
@@ -201,9 +214,9 @@ func main() {
 		ChainTracker: chaintracker,
 	}
 
-	// Load topic managers dynamically from whitelist (using EventDataStorage)
+	// Load topic managers dynamically from whitelist
 	const whitelistKey = "bsv21:whitelist"
-	tokens, err := store.SMembers(ctx, whitelistKey)
+	tokens, err := redisClient.SMembers(ctx, whitelistKey).Result()
 	if err != nil {
 		log.Fatalf("Failed to get whitelisted tokens: %v", err)
 	}

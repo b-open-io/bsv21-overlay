@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"log"
-	"math"
 	"os"
 	"os/signal"
 	"sync"
@@ -25,6 +24,7 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 )
 
 // Package-level variables for shared services
@@ -40,6 +40,7 @@ var (
 	eventStorage storage.EventDataStorage
 	beefStorage  beef.BeefStorage
 	bsv21Lookup  *lookups.Bsv21EventsLookup
+	redisClient  *redis.Client
 
 	// Engine cache for token processors
 	engineCache = make(map[string]*engine.Engine)
@@ -62,7 +63,7 @@ var (
 	// Configuration from flags/env
 	eventsURL string
 	beefURL   string
-	pubsubURL string
+	redisURL  string
 	envFile   string
 	
 	// Debug flags to control which components run
@@ -86,7 +87,7 @@ func init() {
 	flag.StringVar(&topicID, "topic", os.Getenv("BSV21_TOPIC"), "Topic ID to subscribe to")
 	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
 	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
-	flag.StringVar(&pubsubURL, "pubsub", os.Getenv("PUBSUB_URL"), "PubSub URL")
+	flag.StringVar(&redisURL, "redis", os.Getenv("REDIS_URL"), "Redis URL for pub/sub and queues")
 	flag.StringVar(&envFile, "env", ".env", "Path to .env file")
 	
 	// Debug flags to enable/disable components
@@ -125,7 +126,7 @@ func init() {
 	}
 
 	// Create storage using the cleaned up configuration
-	eventStorage, err = config.CreateEventStorage(eventsURL, beefURL, pubsubURL)
+	eventStorage, err = config.CreateEventStorage(eventsURL, beefURL, redisURL)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
@@ -138,6 +139,12 @@ func init() {
 
 	// Get BeefStorage from eventStorage
 	beefStorage = eventStorage.GetBeefStorage()
+	
+	// Get Redis client for direct operations
+	redisClient = eventStorage.GetRedisClient()
+	if redisClient == nil {
+		log.Fatal("Redis client is required for BSV21 overlay operations")
+	}
 
 	// Initialize metrics
 	metricsDone = make(chan *tokenSummary, 1000)
@@ -170,7 +177,7 @@ func main() {
 
 	// Log initial whitelist
 	const whitelistKey = "bsv21:whitelist"
-	if tokens, err := eventStorage.SMembers(ctx, whitelistKey); err == nil {
+	if tokens, err := redisClient.SMembers(ctx, whitelistKey).Result(); err == nil {
 		log.Printf("Token whitelist: %v", tokens)
 	}
 
@@ -237,7 +244,7 @@ func main() {
 func jungleBusSubscriber(ctx context.Context) error {
 	// Check for existing progress using sorted set
 	startBlock := fromBlock
-	if progress, err := eventStorage.ZScore(ctx, "progress", topicID); err == nil && progress > 0 {
+	if progress, err := redisClient.ZScore(ctx, "progress", topicID).Result(); err == nil && progress > 0 {
 		startBlock = uint64(progress)
 		log.Printf("Resuming %s from block %d", topicID, startBlock)
 	}
@@ -256,10 +263,10 @@ func jungleBusSubscriber(ctx context.Context) error {
 				log.Printf("[TX]: %d - %d: %d %s", txn.BlockHeight, txn.BlockIndex, len(txn.Transaction), txn.Id)
 
 				// Add to queue with score based on block height and index
-				if err := eventStorage.ZAdd(ctx, "bsv21", storage.ZMember{
+				if err := redisClient.ZAdd(ctx, "bsv21", redis.Z{
 					Member: txn.Id,
 					Score:  float64(txn.BlockHeight) + float64(txn.BlockIndex)/1e9,
-				}); err != nil {
+				}).Err(); err != nil {
 					log.Printf("Failed to add transaction to queue: %v", err)
 				}
 			},
@@ -268,10 +275,10 @@ func jungleBusSubscriber(ctx context.Context) error {
 				switch status.StatusCode {
 				case 200:
 					// Update progress using sorted set
-					if err := eventStorage.ZAdd(ctx, "progress", storage.ZMember{
+					if err := redisClient.ZAdd(ctx, "progress", redis.Z{
 						Member: topicID,
 						Score:  float64(status.Block + 1),
-					}); err != nil {
+					}).Err(); err != nil {
 						log.Printf("Failed to update progress: %v", err)
 					}
 					txcount = 0
@@ -319,7 +326,12 @@ func queueProcessor(ctx context.Context) {
 		start := time.Now()
 
 		// Get transactions with their scores
-		txidsWithScores, err := eventStorage.ZRange(ctx, "bsv21", -math.MaxFloat64, math.MaxFloat64, 0, 1000)
+		txidsWithScores, err := redisClient.ZRangeByScoreWithScores(ctx, "bsv21", &redis.ZRangeBy{
+			Min:    "-inf",
+			Max:    "+inf",
+			Offset: 0,
+			Count:  1000,
+		}).Result()
 		if err != nil {
 			log.Printf("Failed to query Redis: %v", err)
 			select {
@@ -344,13 +356,14 @@ func queueProcessor(ctx context.Context) {
 
 		// Collect token operations grouped by tokenId
 		var tokenOpsMutex sync.Mutex
-		tokenQueues := make(map[string][]storage.ZMember)
+		tokenQueues := make(map[string][]redis.Z)
 		txidsToRemove := make([]string, 0)
 
 		for _, z := range txidsWithScores {
 			wg.Add(1)
 			limiter <- struct{}{}
-			go func(txidStr string, score float64) {
+			go func(member interface{}, score float64) {
+				txidStr := member.(string)
 				defer func() {
 					wg.Done()
 					<-limiter
@@ -396,7 +409,7 @@ func queueProcessor(ctx context.Context) {
 					tokenOpsMutex.Lock()
 					for tokenId := range tokenIds {
 						key := "tok:" + tokenId
-						tokenQueues[key] = append(tokenQueues[key], storage.ZMember{
+						tokenQueues[key] = append(tokenQueues[key], redis.Z{
 							Score:  score,
 							Member: txidStr,
 						})
@@ -435,14 +448,18 @@ func queueProcessor(ctx context.Context) {
 		// Execute all token queue operations in batch
 		// This ensures transactions are added in the correct order
 		for key, members := range tokenQueues {
-			if err := eventStorage.ZAdd(ctx, key, members...); err != nil {
+			if err := redisClient.ZAdd(ctx, key, members...).Err(); err != nil {
 				log.Printf("Failed to add to token queue %s: %v", key, err)
 			}
 		}
 
 		// Remove processed transactions from main queue
 		if len(txidsToRemove) > 0 {
-			if err := eventStorage.ZRem(ctx, "bsv21", txidsToRemove...); err != nil {
+			membersToRemove := make([]interface{}, len(txidsToRemove))
+			for i, txid := range txidsToRemove {
+				membersToRemove[i] = txid
+			}
+			if err := redisClient.ZRem(ctx, "bsv21", membersToRemove...).Err(); err != nil {
 				log.Printf("Failed to remove from main queue: %v", err)
 			}
 		}
@@ -466,7 +483,7 @@ func tokenProcessor(ctx context.Context) {
 		}
 
 		// Get whitelisted tokens
-		whitelistedTokens, err := eventStorage.SMembers(ctx, whitelistKey)
+		whitelistedTokens, err := redisClient.SMembers(ctx, whitelistKey).Result()
 		if err != nil {
 			log.Printf("Failed to get whitelisted tokens: %v", err)
 			select {
@@ -508,7 +525,12 @@ func tokenProcessor(ctx context.Context) {
 			key := "tok:" + tokenId
 
 			// Check if this token has any transactions
-			members, err := eventStorage.ZRange(ctx, key, -math.MaxFloat64, math.MaxFloat64, 0, 1)
+			members, err := redisClient.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
+				Min:    "-inf",
+				Max:    "+inf",
+				Offset: 0,
+				Count:  1,
+			}).Result()
 			if err != nil || len(members) == 0 {
 				continue
 			}
@@ -566,7 +588,10 @@ func processToken(ctx context.Context, tokenId string, key string) {
 	tm := "tm_" + tokenId
 
 	// Get all transactions for this token (in order)
-	members, err := eventStorage.ZRange(ctx, key, -math.MaxFloat64, math.MaxFloat64, 0, 0)
+	members, err := redisClient.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
+		Min: "-inf",
+		Max: "+inf",
+	}).Result()
 	if err != nil {
 		log.Printf("Failed to query token queue %s: %v", tokenId, err)
 		return
@@ -581,7 +606,7 @@ func processToken(ctx context.Context, tokenId string, key string) {
 
 	// Process each transaction sequentially for this token
 	for _, member := range members {
-		txidStr := member.Member
+		txidStr := member.Member.(string)
 		select {
 		case <-ctx.Done():
 			return
@@ -643,7 +668,7 @@ func processToken(ctx context.Context, tokenId string, key string) {
 		}
 
 		// Remove from queue
-		if err := eventStorage.ZRem(ctx, key, txidStr); err != nil {
+		if err := redisClient.ZRem(ctx, key, txidStr).Err(); err != nil {
 			log.Printf("Failed to remove %s from queue: %v", txidStr, err)
 		}
 

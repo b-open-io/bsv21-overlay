@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"math"
 	"os"
 	"os/signal"
 	"sync"
@@ -19,10 +18,12 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/redis/go-redis/v9"
 )
 
 var eventStorage storage.EventDataStorage
 var chaintracker *headers_client.Client
+var redisClient *redis.Client
 
 func init() {
 	godotenv.Load(".env")
@@ -32,6 +33,12 @@ func init() {
 	eventStorage, err = config.CreateEventStorage("", "", "")
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
+	}
+	
+	// Get Redis client for direct operations
+	redisClient = eventStorage.GetRedisClient()
+	if redisClient == nil {
+		log.Fatal("Redis client is required for BSV21 overlay operations")
 	}
 
 	// Set up chain tracker
@@ -64,7 +71,12 @@ func main() {
 	for {
 		start := time.Now()
 		// Get transactions from the main queue
-		members, err := eventStorage.ZRange(ctx, "bsv21", -math.MaxFloat64, math.MaxFloat64, 0, 1000)
+		members, err := redisClient.ZRangeByScoreWithScores(ctx, "bsv21", &redis.ZRangeBy{
+			Min:    "-inf",
+			Max:    "+inf",
+			Offset: 0,
+			Count:  1000,
+		}).Result()
 		if err != nil {
 			log.Fatalf("Failed to query Redis: %v", err)
 		} else if len(members) == 0 {
@@ -74,10 +86,11 @@ func main() {
 			var wg sync.WaitGroup
 			limiter := make(chan struct{}, 64)
 			for _, member := range members {
-				txidStr := member.Member
 				wg.Add(1)
 				limiter <- struct{}{}
-				go func(txidStr string) {
+				go func(z redis.Z) {
+					txidStr := z.Member.(string)
+					score := z.Score
 					defer func() {
 						wg.Done()
 						<-limiter
@@ -107,32 +120,22 @@ func main() {
 							}
 						}
 						if len(tokenIds) > 0 {
-							var score float64
-							if tx.MerklePath != nil {
-								score = float64(tx.MerklePath.BlockHeight)
-								for _, leaf := range tx.MerklePath.Path[0] {
-									if leaf.Hash != nil && leaf.Hash.Equal(*txid) {
-										score += float64(leaf.Offset) / 1e9
-										break
-									}
-								}
-							} else {
-								score = float64(time.Now().Unix())
-							}
+							// Use the score from the original queue entry
+							// It already contains the block height + index information
 							for tokenId := range tokenIds {
-								if err := eventStorage.ZAdd(ctx, "tok:"+tokenId, storage.ZMember{
+								if err := redisClient.ZAdd(ctx, "tok:"+tokenId, redis.Z{
 									Score:  score,
 									Member: txidStr,
-								}); err != nil {
+								}).Err(); err != nil {
 									log.Fatalf("Failed to set token in queue: %v", err)
 								}
 							}
 						}
-						if err := eventStorage.ZRem(ctx, "bsv21", txidStr); err != nil {
+						if err := redisClient.ZRem(ctx, "bsv21", txidStr).Err(); err != nil {
 							log.Fatalf("Failed to remove from queue: %v", err)
 						}
 					}
-				}(txidStr)
+				}(member)
 			}
 			duration := time.Since(start)
 			log.Printf("Processed %d txids in %s, %vtx/s\n", len(members), duration, float64(len(members))/duration.Seconds())

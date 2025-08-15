@@ -4,7 +4,7 @@ go 1.24.3
 
 require (
 	github.com/GorillaPool/go-junglebus v0.2.14
-	github.com/b-open-io/overlay v0.0.0-20250506153828-06d77554ad0d
+	github.com/b-open-io/overlay v0.0.0-20250115191248-885801cd573c
 	github.com/bitcoin-sv/go-templates v0.0.0-00010101000000-000000000000
 	github.com/bsv-blockchain/go-overlay-services v0.1.1
 	github.com/bsv-blockchain/go-sdk v1.2.6
