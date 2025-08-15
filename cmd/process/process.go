@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/topics"
+	"github.com/b-open-io/overlay/beef"
 	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
@@ -20,10 +22,9 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/redis/go-redis/v9"
 )
 
-var store engine.Storage
+var eventStorage storage.EventDataStorage
 var chaintracker *headers_client.Client
 
 type tokenSummary struct {
@@ -37,7 +38,7 @@ func init() {
 
 	// Create storage using the new configuration approach
 	var err error
-	store, err = config.CreateEventStorage("", "", "")
+	eventStorage, err = config.CreateEventStorage("", "", "")
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
@@ -62,37 +63,17 @@ func main() {
 		cancel()
 	}()
 
-	var rdb *redis.Client
-	log.Println("Connecting to Redis", os.Getenv("REDIS_URL"))
-	if opts, err := redis.ParseURL(os.Getenv("REDIS_URL")); err != nil {
-		log.Fatalf("Failed to parse Redis URL: %v", err)
-	} else {
-		rdb = redis.NewClient(opts)
-	}
-	defer func() {
-		if rdb != nil {
-			if err := rdb.Close(); err != nil {
-				log.Printf("Error closing Redis connection: %v", err)
-			}
-		}
-	}()
-
 	// Define whitelist key
 	const whitelistKey = "bsv21:whitelist"
 
 	// Log current whitelist
-	if tokens, err := rdb.SMembers(ctx, whitelistKey).Result(); err == nil {
+	if tokens, err := eventStorage.SMembers(ctx, whitelistKey); err == nil {
 		log.Printf("Token whitelist: %v", tokens)
 	} else {
 		log.Printf("Failed to get token whitelist: %v", err)
 	}
 
-	// Storage is already initialized in init()
-	// Cast store to EventDataStorage for the lookup
-	eventStorage, ok := store.(storage.EventDataStorage)
-	if !ok {
-		log.Fatalf("Storage does not implement EventDataStorage interface")
-	}
+	// Storage is already initialized in init() as eventStorage
 
 	bsv21Lookup, err := lookups.NewBsv21EventsLookup(eventStorage)
 	if err != nil {
@@ -139,7 +120,7 @@ func main() {
 		}
 
 		// Get whitelisted tokens
-		whitelistedTokens, err := rdb.SMembers(ctx, whitelistKey).Result()
+		whitelistedTokens, err := eventStorage.SMembers(ctx, whitelistKey)
 		if err != nil {
 			log.Printf("Failed to get whitelisted tokens: %v", err)
 			time.Sleep(5 * time.Second)
@@ -154,12 +135,12 @@ func main() {
 			key := "tok:" + tokenId
 
 			// Check if this token has any transactions to process
-			exists, err := rdb.Exists(ctx, key).Result()
+			members, err := eventStorage.ZRange(ctx, key, -math.MaxFloat64, math.MaxFloat64, 0, 1)
 			if err != nil {
 				log.Printf("Failed to check existence of key %s: %v", key, err)
 				continue
 			}
-			if exists == 0 {
+			if len(members) == 0 {
 				// No transactions for this token
 				continue
 			}
@@ -186,7 +167,7 @@ func main() {
 						Managers: map[string]engine.TopicManager{
 							tm: topics.NewBsv21ValidatedTopicManager(
 								tm,
-								store,
+								eventStorage,
 								[]string{
 									tokenId,
 								},
@@ -195,24 +176,19 @@ func main() {
 						LookupServices: map[string]engine.LookupService{
 							"bsv21": bsv21Lookup,
 						},
-						Storage:      store,
+						Storage:      eventStorage,
 						ChainTracker: chaintracker,
 					}
 
 					// start := time.Now()
-					txids, err := rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
-						Stop:    "+inf",
-						Start:   "-inf",
-						Key:     key,
-						ByScore: true,
-						// Count:   1000,
-					}).Result()
+					members, err := eventStorage.ZRange(ctx, key, -math.MaxFloat64, math.MaxFloat64, 0, 0)
 					if err != nil {
 						log.Fatalf("Failed to query Redis: %v", err)
 					}
-					// log.Println("Processing tokenId", parts[1], len(txids), "txids")
+					// log.Println("Processing tokenId", parts[1], len(members), "txids")
 					logTime := time.Now()
-					for _, txidStr := range txids {
+					for _, member := range members {
+						txidStr := member.Member
 						select {
 						case <-ctx.Done():
 							log.Println("Context canceled, stopping processing...")
@@ -221,7 +197,7 @@ func main() {
 							// log.Println("Processing", parts[1], txidStr)
 							if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
 								log.Fatalf("Invalid txid: %v", err)
-							} else if tx, err := eventStorage.GetBeefStorage().LoadTx(ctx, txid, chaintracker); err != nil {
+							} else if tx, err := beef.LoadTx(ctx, eventStorage.GetBeefStorage(), txid, chaintracker); err != nil {
 								log.Fatalf("Failed to load transaction: %v", err)
 							} else {
 								beefDoc := &transaction.Beef{
@@ -229,7 +205,7 @@ func main() {
 									Transactions: map[chainhash.Hash]*transaction.BeefTx{},
 								}
 								for _, input := range tx.Inputs {
-									if input.SourceTransaction, err = eventStorage.GetBeefStorage().LoadTx(ctx, input.SourceTXID, chaintracker); err != nil {
+									if input.SourceTransaction, err = beef.LoadTx(ctx, eventStorage.GetBeefStorage(), input.SourceTXID, chaintracker); err != nil {
 										log.Fatalf("Failed to load source transaction: %v", err)
 									} else if _, err := beefDoc.MergeTransaction(input.SourceTransaction); err != nil {
 										log.Fatalf("Failed to merge source transaction: %v", err)
@@ -251,7 +227,7 @@ func main() {
 								} else {
 									// log.Println("Submitted generated", tx.TxID().String(), "in", time.Since(logTime))
 									// logTime = time.Now()
-									if err := rdb.ZRem(ctx, key, txidStr).Err(); err != nil {
+									if err := eventStorage.ZRem(ctx, key, txidStr); err != nil {
 										log.Fatalf("Failed to delete from queue: %v", err)
 									}
 									log.Println("Processed", txid, "in", time.Since(logTime), "as", admit[tm].OutputsToAdmit)
@@ -265,7 +241,7 @@ func main() {
 						}
 					}
 					duration := time.Since(logTime)
-					log.Printf("Processed %s tx %d in %v %vtx/s\n", tokenId, len(txids), duration, float64(len(txids))/duration.Seconds())
+					log.Printf("Processed %s tx %d in %v %vtx/s\n", tokenId, len(members), duration, float64(len(members))/duration.Seconds())
 				}(tokenId, key)
 			}
 		}

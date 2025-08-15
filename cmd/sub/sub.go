@@ -45,7 +45,8 @@ func main() {
 		liteMode  = true
 	)
 
-	// Set up Redis connection
+	// Set up Redis connection for queue management
+	// Note: sub command uses Redis directly for queue operations
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
 		redisURL = "redis://localhost:6379"

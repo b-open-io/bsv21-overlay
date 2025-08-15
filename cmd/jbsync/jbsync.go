@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"sync"
@@ -24,7 +25,6 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/joho/godotenv"
-	"github.com/redis/go-redis/v9"
 )
 
 // Package-level variables for shared services
@@ -35,7 +35,6 @@ var (
 	fromPage  uint64 = 0
 
 	// Services
-	rdb          *redis.Client
 	jbClient     *junglebus.Client
 	chaintracker *headers_client.Client
 	eventStorage storage.EventDataStorage
@@ -71,38 +70,44 @@ var (
 func init() {
 	// Command line flags
 	var envFile string
+	var eventStorageFlag string
+	var beefStorageFlag string
+	var publisherURLFlag string
+	
 	flag.StringVar(&topicID, "topic", "", "Topic ID to subscribe to (required)")
 	flag.StringVar(&envFile, "env", ".env", "Path to .env file")
+	
+	// Storage configuration flags
+	flag.StringVar(&eventStorageFlag, "events", "", "Event storage URL (e.g., mongodb://localhost:27017/bsv21)")
+	flag.StringVar(&beefStorageFlag, "beef", "", "BEEF storage URL (e.g., redis://localhost:6379)")
+	flag.StringVar(&publisherURLFlag, "publisher", "", "Publisher URL (e.g., redis://localhost:6379)")
 
 	// Debug flags to enable/disable components
 	flag.BoolVar(&runJungleBus, "jb", true, "Enable JungleBus subscriber")
 	flag.BoolVar(&runQueueProc, "queue", true, "Enable queue processor")
 	flag.BoolVar(&runTokenProc, "token", true, "Enable token processor")
-	flag.IntVar(&queueConcurrency, "queue-limit", 8, "Queue processor concurrency limit")
+	flag.IntVar(&queueConcurrency, "queue-limit", 16, "Queue processor concurrency limit")
 	flag.IntVar(&tokenConcurrency, "token-limit", 16, "Token processor concurrency limit")
 	flag.Parse()
 
 	// Load environment configuration
 	godotenv.Load(envFile)
 
-	// Check topic ID
-	if topicID == "" {
-		topicID = os.Getenv("BSV21_TOPIC")
+	// Check topic ID only if JungleBus is enabled
+	if runJungleBus {
 		if topicID == "" {
-			log.Fatal("Topic ID is required. Use -topic flag or set BSV21_TOPIC environment variable")
+			topicID = os.Getenv("BSV21_TOPIC")
+			if topicID == "" {
+				log.Fatal("Topic ID is required when JungleBus is enabled. Use -topic flag or set BSV21_TOPIC environment variable")
+			}
 		}
 	}
 
-	// Set up Redis connection
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		redisURL = "redis://localhost:6379"
+	// Publisher URL is needed for event publishing
+	publisherURL := os.Getenv("PUBLISHER_URL")
+	if publisherURL == "" {
+		publisherURL = "redis://localhost:6379"
 	}
-	opts, err := redis.ParseURL(redisURL)
-	if err != nil {
-		log.Fatalf("Failed to parse Redis URL: %v", err)
-	}
-	rdb = redis.NewClient(opts)
 
 	// Set up chain tracker
 	chaintracker = &headers_client.Client{
@@ -115,13 +120,29 @@ func init() {
 	if jungleBusURL == "" {
 		log.Fatalf("JUNGLEBUS environment variable is required")
 	}
+	var err error
 	jbClient, err = junglebus.New(junglebus.WithHTTP(jungleBusURL))
 	if err != nil {
 		log.Fatalf("Failed to create JungleBus client: %v", err)
 	}
 
 	// Create storage using the configuration approach
-	eventStorage, err = config.CreateEventStorage("", "", "")
+	// Command-line flags override environment variables
+	if eventStorageFlag == "" {
+		eventStorageFlag = os.Getenv("EVENT_STORAGE")
+	}
+	if beefStorageFlag == "" {
+		beefStorageFlag = os.Getenv("BEEF_STORAGE")
+		if beefStorageFlag == "" {
+			// Default to filesystem storage if nothing specified
+			beefStorageFlag = "./beef_storage"
+		}
+	}
+	if publisherURLFlag == "" {
+		publisherURLFlag = publisherURL // Use the publisherURL we already parsed
+	}
+
+	eventStorage, err = config.CreateEventStorage(eventStorageFlag, beefStorageFlag, publisherURLFlag)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
@@ -166,7 +187,7 @@ func main() {
 
 	// Log initial whitelist
 	const whitelistKey = "bsv21:whitelist"
-	if tokens, err := rdb.SMembers(ctx, whitelistKey).Result(); err == nil {
+	if tokens, err := eventStorage.SMembers(ctx, whitelistKey); err == nil {
 		log.Printf("Token whitelist: %v", tokens)
 	}
 
@@ -226,20 +247,14 @@ func main() {
 	// Signal that shutdown is complete
 	close(shutdownComplete)
 
-	// Close connections
-	if rdb != nil {
-		if err := rdb.Close(); err != nil {
-			log.Printf("Error closing Redis connection: %v", err)
-		}
-	}
 	log.Println("Shutdown complete")
 }
 
 // jungleBusSubscriber handles JungleBus subscription (Stage 1)
 func jungleBusSubscriber(ctx context.Context) error {
-	// Check for existing progress
+	// Check for existing progress using sorted set
 	startBlock := fromBlock
-	if progress, err := rdb.HGet(ctx, "progress", topicID).Int(); err == nil {
+	if progress, err := eventStorage.ZScore(ctx, "progress", topicID); err == nil && progress > 0 {
 		startBlock = uint64(progress)
 		log.Printf("Resuming %s from block %d", topicID, startBlock)
 	}
@@ -257,11 +272,11 @@ func jungleBusSubscriber(ctx context.Context) error {
 				txcount++
 				log.Printf("[TX]: %d - %d: %d %s", txn.BlockHeight, txn.BlockIndex, len(txn.Transaction), txn.Id)
 
-				// Add to Redis queue with score based on block height and index
-				if err := rdb.ZAdd(ctx, "bsv21", redis.Z{
+				// Add to queue with score based on block height and index
+				if err := eventStorage.ZAdd(ctx, "bsv21", storage.ZMember{
 					Member: txn.Id,
 					Score:  float64(txn.BlockHeight) + float64(txn.BlockIndex)/1e9,
-				}).Err(); err != nil {
+				}); err != nil {
 					log.Printf("Failed to add transaction to queue: %v", err)
 				}
 			},
@@ -269,8 +284,11 @@ func jungleBusSubscriber(ctx context.Context) error {
 				log.Printf("[STATUS]: %d %v %d processed", status.StatusCode, status.Message, txcount)
 				switch status.StatusCode {
 				case 200:
-					// Update progress
-					if err := rdb.HSet(ctx, "progress", topicID, status.Block+1).Err(); err != nil {
+					// Update progress using sorted set
+					if err := eventStorage.ZAdd(ctx, "progress", storage.ZMember{
+						Member: topicID,
+						Score:  float64(status.Block + 1),
+					}); err != nil {
 						log.Printf("Failed to update progress: %v", err)
 					}
 					txcount = 0
@@ -316,16 +334,9 @@ func queueProcessor(ctx context.Context) {
 
 		// Process batch from main queue
 		start := time.Now()
-		query := redis.ZRangeArgs{
-			Stop:    "+inf",
-			Start:   "-inf",
-			Key:     "bsv21",
-			ByScore: true,
-			Count:   1000,
-		}
 
 		// Get transactions with their scores
-		txidsWithScores, err := rdb.ZRangeArgsWithScores(ctx, query).Result()
+		txidsWithScores, err := eventStorage.ZRange(ctx, "bsv21", -math.MaxFloat64, math.MaxFloat64, 0, 1000)
 		if err != nil {
 			log.Printf("Failed to query Redis: %v", err)
 			select {
@@ -350,8 +361,8 @@ func queueProcessor(ctx context.Context) {
 
 		// Collect token operations grouped by tokenId
 		var tokenOpsMutex sync.Mutex
-		tokenQueues := make(map[string][]redis.Z)
-		txidsToRemove := make([]interface{}, 0)
+		tokenQueues := make(map[string][]storage.ZMember)
+		txidsToRemove := make([]string, 0)
 
 		for _, z := range txidsWithScores {
 			wg.Add(1)
@@ -368,7 +379,7 @@ func queueProcessor(ctx context.Context) {
 					return
 				}
 
-				tx, err := beefStorage.LoadTx(ctx, txid, chaintracker)
+				tx, err := beef.LoadTx(ctx, beefStorage, txid, chaintracker)
 				if err != nil {
 					log.Printf("Failed to load tx %s: %v", txidStr, err)
 					return
@@ -376,7 +387,7 @@ func queueProcessor(ctx context.Context) {
 
 				// Load inputs
 				for _, input := range tx.Inputs {
-					if input.SourceTransaction, err = beefStorage.LoadTx(ctx, input.SourceTXID, chaintracker); err != nil {
+					if input.SourceTransaction, err = beef.LoadTx(ctx, beefStorage, input.SourceTXID, chaintracker); err != nil {
 						log.Printf("Failed to load input tx: %v", err)
 						return
 					}
@@ -402,7 +413,7 @@ func queueProcessor(ctx context.Context) {
 					tokenOpsMutex.Lock()
 					for tokenId := range tokenIds {
 						key := "tok:" + tokenId
-						tokenQueues[key] = append(tokenQueues[key], redis.Z{
+						tokenQueues[key] = append(tokenQueues[key], storage.ZMember{
 							Score:  score,
 							Member: txidStr,
 						})
@@ -415,7 +426,7 @@ func queueProcessor(ctx context.Context) {
 					txidsToRemove = append(txidsToRemove, txidStr)
 					tokenOpsMutex.Unlock()
 				}
-			}(z.Member.(string), z.Score)
+			}(z.Member, z.Score)
 		}
 
 		// Create a channel to signal when all goroutines are done
@@ -441,14 +452,14 @@ func queueProcessor(ctx context.Context) {
 		// Execute all token queue operations in batch
 		// This ensures transactions are added in the correct order
 		for key, members := range tokenQueues {
-			if err := rdb.ZAdd(ctx, key, members...).Err(); err != nil {
+			if err := eventStorage.ZAdd(ctx, key, members...); err != nil {
 				log.Printf("Failed to add to token queue %s: %v", key, err)
 			}
 		}
 
 		// Remove processed transactions from main queue
 		if len(txidsToRemove) > 0 {
-			if err := rdb.ZRem(ctx, "bsv21", txidsToRemove...).Err(); err != nil {
+			if err := eventStorage.ZRem(ctx, "bsv21", txidsToRemove...); err != nil {
 				log.Printf("Failed to remove from main queue: %v", err)
 			}
 		}
@@ -472,7 +483,7 @@ func tokenProcessor(ctx context.Context) {
 		}
 
 		// Get whitelisted tokens
-		whitelistedTokens, err := rdb.SMembers(ctx, whitelistKey).Result()
+		whitelistedTokens, err := eventStorage.SMembers(ctx, whitelistKey)
 		if err != nil {
 			log.Printf("Failed to get whitelisted tokens: %v", err)
 			select {
@@ -514,8 +525,8 @@ func tokenProcessor(ctx context.Context) {
 			key := "tok:" + tokenId
 
 			// Check if this token has any transactions
-			exists, err := rdb.Exists(ctx, key).Result()
-			if err != nil || exists == 0 {
+			members, err := eventStorage.ZRange(ctx, key, -math.MaxFloat64, math.MaxFloat64, 0, 1)
+			if err != nil || len(members) == 0 {
 				continue
 			}
 
@@ -572,26 +583,22 @@ func processToken(ctx context.Context, tokenId string, key string) {
 	tm := "tm_" + tokenId
 
 	// Get all transactions for this token (in order)
-	txids, err := rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
-		Stop:    "+inf",
-		Start:   "-inf",
-		Key:     key,
-		ByScore: true,
-	}).Result()
+	members, err := eventStorage.ZRange(ctx, key, -math.MaxFloat64, math.MaxFloat64, 0, 0)
 	if err != nil {
 		log.Printf("Failed to query token queue %s: %v", tokenId, err)
 		return
 	}
 
-	if len(txids) == 0 {
+	if len(members) == 0 {
 		return
 	}
 
-	log.Printf("Processing token %s: %d transactions", tokenId, len(txids))
+	log.Printf("Processing token %s: %d transactions", tokenId, len(members))
 	startTime := time.Now()
 
 	// Process each transaction sequentially for this token
-	for _, txidStr := range txids {
+	for _, member := range members {
+		txidStr := member.Member
 		select {
 		case <-ctx.Done():
 			return
@@ -604,7 +611,7 @@ func processToken(ctx context.Context, tokenId string, key string) {
 			continue
 		}
 
-		tx, err := beefStorage.LoadTx(ctx, txid, chaintracker)
+		tx, err := beef.LoadTx(ctx, beefStorage, txid, chaintracker)
 		if err != nil {
 			log.Printf("Failed to load transaction %s: %v", txidStr, err)
 			continue
@@ -618,7 +625,7 @@ func processToken(ctx context.Context, tokenId string, key string) {
 
 		// Add input transactions
 		for _, input := range tx.Inputs {
-			if input.SourceTransaction, err = beefStorage.LoadTx(ctx, input.SourceTXID, chaintracker); err != nil {
+			if input.SourceTransaction, err = beef.LoadTx(ctx, beefStorage, input.SourceTXID, chaintracker); err != nil {
 				log.Printf("Failed to load source transaction: %v", err)
 				continue
 			}
@@ -653,7 +660,7 @@ func processToken(ctx context.Context, tokenId string, key string) {
 		}
 
 		// Remove from queue
-		if err := rdb.ZRem(ctx, key, txidStr).Err(); err != nil {
+		if err := eventStorage.ZRem(ctx, key, txidStr); err != nil {
 			log.Printf("Failed to remove %s from queue: %v", txidStr, err)
 		}
 
@@ -667,7 +674,7 @@ func processToken(ctx context.Context, tokenId string, key string) {
 	}
 
 	duration := time.Since(startTime)
-	log.Printf("Completed token %s: %d tx in %v (%.2ftx/s)", tokenId, len(txids), duration, float64(len(txids))/duration.Seconds())
+	log.Printf("Completed token %s: %d tx in %v (%.2ftx/s)", tokenId, len(members), duration, float64(len(members))/duration.Seconds())
 }
 
 // metricsCollector collects and reports processing metrics

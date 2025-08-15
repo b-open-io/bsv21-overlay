@@ -61,6 +61,7 @@ export EVENT_STORAGE=redis://localhost:6379           # Redis
 export EVENT_STORAGE=./overlay.db                     # SQLite (local file)
 
 # BEEF Storage (Optional - defaults to ./beef_storage/)
+# Single storage backend:
 export BEEF_STORAGE=redis://localhost:6379            # Redis (recommended for production)
 # OR
 export BEEF_STORAGE=mongodb://user:pass@localhost:27017/beef?authSource=admin    # MongoDB
@@ -68,8 +69,13 @@ export BEEF_STORAGE=mongodb://user:pass@localhost:27017/beef?authSource=admin   
 export BEEF_STORAGE=./beef.db                         # SQLite
 # OR leave unset to use ./beef_storage/ directory     # Filesystem (default)
 
+# Hierarchical storage (stack multiple backends):
+export BEEF_STORAGE='["lru://1gb", "redis://localhost:6379", "junglebus://"]'  # JSON array
+# OR
+export BEEF_STORAGE="lru://100mb,redis://localhost:6379,junglebus://"         # Comma-separated
+
 # Publisher Configuration (Required)
-export REDIS_URL=redis://localhost:6379               # Redis for pub/sub
+export PUBLISHER_URL=redis://localhost:6379           # Publisher for pub/sub
 
 # Service Configuration
 export PORT=3000
@@ -91,7 +97,7 @@ export ARC_CALLBACK_TOKEN=your_callback_token
 
 **Development (minimal setup):**
 ```bash
-export REDIS_URL=redis://localhost:6379
+export PUBLISHER_URL=redis://localhost:6379
 # EVENT_STORAGE defaults to ./overlay.db
 # BEEF_STORAGE defaults to ./beef_storage/
 ```
@@ -100,14 +106,14 @@ export REDIS_URL=redis://localhost:6379
 ```bash
 export EVENT_STORAGE=mongodb://user:pass@localhost:27017/bsv21?authSource=admin
 export BEEF_STORAGE=redis://localhost:6379
-export REDIS_URL=redis://localhost:6379
+export PUBLISHER_URL=redis://localhost:6379
 ```
 
 **All Redis:**
 ```bash
 export EVENT_STORAGE=redis://localhost:6379
 export BEEF_STORAGE=redis://localhost:6379
-export REDIS_URL=redis://localhost:6379
+export PUBLISHER_URL=redis://localhost:6379
 ```
 
 For development convenience, you can create a `.env` file in the project root with these variables (without the `export` prefix), which will be automatically loaded when running from the source directory.
@@ -331,11 +337,51 @@ The service uses two types of storage with auto-detection from connection string
 #### BEEF Storage
 Stores raw transaction data (BEEF - Bitcoin Extended Format) for SPV validation.
 
-**Options (auto-detected from URL):**
+**Single Backend Options (auto-detected from URL):**
 - **Redis** (`redis://...`): High-performance key-value storage (recommended for production)
 - **MongoDB** (`mongodb://...`): Document storage with GridFS for large transactions
 - **SQLite** (`./beef.db`): Local file database for development
 - **Filesystem** (`./beef_storage/`): Directory-based storage (default if `BEEF_STORAGE` not set)
+- **JungleBus** (`junglebus://`): Fetches from JungleBus API (read-only)
+
+**Hierarchical Storage:**
+
+You can stack multiple storage backends to create a hierarchical cache system. Each layer checks its storage first, then falls back to the next layer if data is not found.
+
+**Supported Formats:**
+- JSON array: `["lru://100mb", "redis://localhost:6379", "junglebus://"]`
+- Comma-separated: `"lru://100mb,redis://localhost:6379,junglebus://"`
+- Single string: `"redis://localhost:6379"` (backwards compatible)
+
+**Available Backends for Stacking:**
+- `lru://100mb` or `lru://1gb` - In-memory LRU cache with size limit
+- `redis://host:port?ttl=24h` - Redis cache with optional TTL (e.g., ?ttl=1h, ?ttl=30m)
+  - TTL requires HEXPIRE support (Redis 7.4+ or compatible servers)
+  - Automatically detects support at connection time
+- `mongodb://host:port/db` - MongoDB storage
+- `sqlite://path/to/db` or `./beef.db` - SQLite database
+- `file://path/to/dir` or `./beef_storage/` - Filesystem storage
+- `junglebus://` or `junglebus://custom.host.com` - JungleBus API (defaults to junglebus.gorillapool.io)
+
+**Example Configurations:**
+
+```bash
+# High-performance production stack
+export BEEF_STORAGE='["lru://1gb", "redis://localhost:6379", "sqlite://./beef.db", "junglebus://"]'
+# Data flows: Memory → Redis → SQLite → JungleBus API
+
+# Development stack with fallback
+export BEEF_STORAGE="lru://100mb,./beef.db,junglebus://"
+# Data flows: Memory → Local SQLite → JungleBus API
+
+# Simple Redis with JungleBus fallback
+export BEEF_STORAGE="redis://localhost:6379,junglebus://"
+# Data flows: Redis → JungleBus API
+```
+
+When data is found in a lower layer, it's automatically cached in upper layers for faster future access. This creates an efficient multi-tier caching system.
+
+**Note:** If your connection strings contain commas, use the JSON array format to properly escape them.
 
 #### Event Storage
 Stores processed BSV21 events with indexing for efficient queries.
@@ -347,7 +393,7 @@ Stores processed BSV21 events with indexing for efficient queries.
 - **Redis** (`redis://...`): High-performance in-memory event storage
 - **SQLite** (`./overlay.db`): Lightweight file-based storage for single-node deployments
 
-Note: `REDIS_URL` is always required for the publisher (pub/sub functionality).
+Note: `PUBLISHER_URL` is always required for the publisher (pub/sub functionality).
 
 ### Event Value Storage
 

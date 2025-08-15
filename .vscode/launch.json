@@ -21,7 +21,7 @@
             "cwd": "${workspaceFolder}",
             "env": {
                 "BLOCK_HEADERS_URL": "http://localhost:8080",
-                "REDIS_URL": "redis://localhost:6380",
+                "PUBLISHER_URL": "redis://localhost:6380",
                 "REDIS_BEEF": "redis://localhost:6666",
                 "MONGO_URL": "mongodb://mongo:mongo@localhost:27017",
             },
@@ -39,7 +39,7 @@
             "cwd": "${workspaceFolder}",
             "env": {
                 "BLOCK_HEADERS_URL": "http://localhost:8080",
-                "REDIS_URL": "redis://localhost:6380",
+                "PUBLISHER_URL": "redis://localhost:6380",
                 "REDIS_BEEF": "redis://localhost:6666",
                 "MONGO_URL": "mongodb://mongo:mongo@localhost:27017",
             },

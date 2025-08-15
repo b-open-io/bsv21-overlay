@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"sync"
@@ -10,30 +11,27 @@ import (
 	"time"
 
 	"github.com/b-open-io/overlay/beef"
+	"github.com/b-open-io/overlay/config"
+	"github.com/b-open-io/overlay/storage"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/redis/go-redis/v9"
 )
 
-var beefStorage beef.BeefStorage
+var eventStorage storage.EventDataStorage
 var chaintracker *headers_client.Client
 
 func init() {
 	godotenv.Load(".env")
 
-	// Set up BEEF storage
-	redisBeefURL := os.Getenv("REDIS_BEEF")
-	if redisBeefURL == "" {
-		redisBeefURL = os.Getenv("REDIS_URL")
-	}
+	// Create storage using the new configuration approach
 	var err error
-	beefStorage, err = beef.NewRedisBeefStorage(redisBeefURL, 0)
+	eventStorage, err = config.CreateEventStorage("", "", "")
 	if err != nil {
-		log.Fatalf("Failed to create BEEF storage: %v", err)
+		log.Fatalf("Failed to create storage: %v", err)
 	}
 
 	// Set up chain tracker
@@ -61,32 +59,22 @@ func main() {
 		cancel()
 	}()
 
-	var rdb *redis.Client
-	log.Println("Connecting to Redis", os.Getenv("REDIS_URL"))
-	if opts, err := redis.ParseURL(os.Getenv("REDIS_URL")); err != nil {
-		log.Fatalf("Failed to parse Redis URL: %v", err)
-	} else {
-		rdb = redis.NewClient(opts)
-	}
+	// Storage is already initialized in init() as eventStorage
 
 	for {
 		start := time.Now()
-		query := redis.ZRangeArgs{
-			Stop:    "+inf",
-			Start:   "-inf",
-			Key:     "bsv21",
-			ByScore: true,
-			Count:   1000,
-		}
-		if txids, err := rdb.ZRangeArgs(ctx, query).Result(); err != nil {
+		// Get transactions from the main queue
+		members, err := eventStorage.ZRange(ctx, "bsv21", -math.MaxFloat64, math.MaxFloat64, 0, 1000)
+		if err != nil {
 			log.Fatalf("Failed to query Redis: %v", err)
-		} else if len(txids) == 0 {
+		} else if len(members) == 0 {
 			time.Sleep(1 * time.Second)
 		} else {
-			log.Println("Processing", len(txids), "txids")
+			log.Println("Processing", len(members), "txids")
 			var wg sync.WaitGroup
 			limiter := make(chan struct{}, 64)
-			for _, txidStr := range txids {
+			for _, member := range members {
+				txidStr := member.Member
 				wg.Add(1)
 				limiter <- struct{}{}
 				go func(txidStr string) {
@@ -97,11 +85,11 @@ func main() {
 					log.Println("Processing txid", txidStr)
 					if txid, err := chainhash.NewHashFromHex(txidStr); err != nil {
 						log.Fatalf("Failed to parse txid: %v", err)
-					} else if tx, err := beefStorage.LoadTx(ctx, txid, chaintracker); err != nil {
+					} else if tx, err := beef.LoadTx(ctx, eventStorage.GetBeefStorage(), txid, chaintracker); err != nil {
 						log.Fatalf("Failed to load tx: %v", err)
 					} else {
 						for _, input := range tx.Inputs {
-							if input.SourceTransaction, err = beefStorage.LoadTx(ctx, input.SourceTXID, chaintracker); err != nil {
+							if input.SourceTransaction, err = beef.LoadTx(ctx, eventStorage.GetBeefStorage(), input.SourceTXID, chaintracker); err != nil {
 								log.Fatalf("Failed to load input tx: %v", err)
 							}
 						}
@@ -132,22 +120,22 @@ func main() {
 								score = float64(time.Now().Unix())
 							}
 							for tokenId := range tokenIds {
-								if _, err := rdb.ZAdd(ctx, "tok:"+tokenId, redis.Z{
+								if err := eventStorage.ZAdd(ctx, "tok:"+tokenId, storage.ZMember{
 									Score:  score,
 									Member: txidStr,
-								}).Result(); err != nil {
-									log.Fatalf("Failed to set token in Redis: %v", err)
+								}); err != nil {
+									log.Fatalf("Failed to set token in queue: %v", err)
 								}
 							}
 						}
-						if err := rdb.ZRem(ctx, "bsv21", txidStr).Err(); err != nil {
-							log.Fatalf("Failed to remove from Redis: %v", err)
+						if err := eventStorage.ZRem(ctx, "bsv21", txidStr); err != nil {
+							log.Fatalf("Failed to remove from queue: %v", err)
 						}
 					}
 				}(txidStr)
 			}
 			duration := time.Since(start)
-			log.Printf("Processed %d txids in %s, %vtx/s\n", len(txids), duration, float64(len(txids))/duration.Seconds())
+			log.Printf("Processed %d txids in %s, %vtx/s\n", len(members), duration, float64(len(members))/duration.Seconds())
 
 		}
 	}

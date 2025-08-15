@@ -41,7 +41,7 @@ var e *engine.Engine
 var (
 	eventStorageFlag string
 	beefStorageFlag  string
-	redisURLFlag     string
+	publisherURLFlag string
 )
 
 func init() {
@@ -55,9 +55,9 @@ func init() {
 	// Define command-line flags
 	flag.IntVar(&PORT, "p", PORT, "Port to listen on")
 	flag.BoolVar(&SYNC, "s", false, "Start sync")
-	flag.StringVar(&eventStorageFlag, "event-storage", "", "Event storage connection string (e.g., mongodb://localhost:27017/bsv21)")
-	flag.StringVar(&beefStorageFlag, "beef-storage", "", "BEEF storage connection string (e.g., redis://localhost:6379)")
-	flag.StringVar(&redisURLFlag, "redis-url", "", "Redis URL for publisher (e.g., redis://localhost:6379)")
+	flag.StringVar(&eventStorageFlag, "events", "", "Event storage URL (e.g., mongodb://localhost:27017/bsv21)")
+	flag.StringVar(&beefStorageFlag, "beef", "", "BEEF storage URL (e.g., redis://localhost:6379)")
+	flag.StringVar(&publisherURLFlag, "publisher", "", "Publisher URL (e.g., redis://localhost:6379)")
 	flag.Parse()
 	if PORT == 0 {
 		PORT = 3000
@@ -158,8 +158,17 @@ func main() {
 
 	// Create storage using the new configuration approach
 	// Command-line flags override environment variables
+	// If beefStorageFlag is empty, use BEEF_STORAGE environment variable
+	if beefStorageFlag == "" {
+		beefStorageFlag = os.Getenv("BEEF_STORAGE")
+		if beefStorageFlag == "" {
+			// Default to filesystem storage if nothing specified
+			beefStorageFlag = "./beef_storage"
+		}
+	}
+	
 	var err error
-	store, err = config.CreateEventStorage(eventStorageFlag, beefStorageFlag, redisURLFlag)
+	store, err = config.CreateEventStorage(eventStorageFlag, beefStorageFlag, publisherURLFlag)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
