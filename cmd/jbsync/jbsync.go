@@ -75,20 +75,15 @@ var (
 )
 
 func init() {
-	// Parse .env file path first
+	// Load .env file first (with default path)
+	godotenv.Load(".env")
+	
+	// Define all flags at once
 	flag.StringVar(&envFile, "env", ".env", "Path to .env file")
-	flag.Parse()
-	godotenv.Load(envFile)
-	
-	// Reset flags for second parse with env vars loaded
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	
-	// Configuration flags with env var defaults
 	flag.StringVar(&topicID, "topic", os.Getenv("BSV21_TOPIC"), "Topic ID to subscribe to")
 	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
 	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
 	flag.StringVar(&redisURL, "redis", os.Getenv("REDIS_URL"), "Redis URL for pub/sub and queues")
-	flag.StringVar(&envFile, "env", ".env", "Path to .env file")
 	
 	// Debug flags to enable/disable components
 	flag.BoolVar(&runJungleBus, "jb", true, "Enable JungleBus subscriber")
@@ -96,16 +91,10 @@ func init() {
 	flag.BoolVar(&runTokenProc, "token", true, "Enable token processor")
 	flag.IntVar(&queueConcurrency, "qlimit", 16, "Queue processor concurrency")
 	flag.IntVar(&tokenConcurrency, "tlimit", 16, "Token processor concurrency")
-	flag.Parse()
 
 	// Apply defaults
 	if beefURL == "" {
 		beefURL = "./beef_storage"
-	}
-	
-	// Validate required configuration
-	if runJungleBus && topicID == "" {
-		log.Fatal("Topic ID is required when JungleBus is enabled. Use -topic flag or set BSV21_TOPIC environment variable")
 	}
 
 	// Set up chain tracker
@@ -114,18 +103,8 @@ func init() {
 		ApiKey: os.Getenv("HEADERS_KEY"),
 	}
 
-	// Set up JungleBus connection
-	jungleBusURL := os.Getenv("JUNGLEBUS_URL")
-	if jungleBusURL == "" {
-		log.Fatalf("JUNGLEBUS_URL environment variable is required")
-	}
-	var err error
-	jbClient, err = junglebus.New(junglebus.WithHTTP(jungleBusURL))
-	if err != nil {
-		log.Fatalf("Failed to create JungleBus client: %v", err)
-	}
-
 	// Create storage using the cleaned up configuration
+	var err error
 	eventStorage, err = config.CreateEventStorage(eventsURL, beefURL, redisURL)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
@@ -152,6 +131,45 @@ func init() {
 }
 
 func main() {
+	// Parse flags (must be done in main, not init)
+	flag.Parse()
+	
+	// If a different env file was specified, reload it
+	if envFile != ".env" {
+		godotenv.Load(envFile)
+		// Re-read environment variables for flags that weren't explicitly set
+		if flag.Lookup("topic").Value.String() == "" {
+			topicID = os.Getenv("BSV21_TOPIC")
+		}
+		if flag.Lookup("events").Value.String() == "" {
+			eventsURL = os.Getenv("EVENTS_URL")
+		}
+		if flag.Lookup("beef").Value.String() == "" {
+			beefURL = os.Getenv("BEEF_URL")
+		}
+		if flag.Lookup("redis").Value.String() == "" {
+			redisURL = os.Getenv("REDIS_URL")
+		}
+	}
+	
+	// Validate required configuration
+	if runJungleBus && topicID == "" {
+		log.Fatal("Topic ID is required when JungleBus is enabled. Use -topic flag or set BSV21_TOPIC environment variable")
+	}
+	
+	// Set up JungleBus connection if enabled
+	if runJungleBus {
+		jungleBusURL := os.Getenv("JUNGLEBUS_URL")
+		if jungleBusURL == "" {
+			log.Fatal("JUNGLEBUS_URL environment variable is required when JungleBus is enabled")
+		}
+		var err error
+		jbClient, err = junglebus.New(junglebus.WithHTTP(jungleBusURL))
+		if err != nil {
+			log.Fatalf("Failed to create JungleBus client: %v", err)
+		}
+	}
+	
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
