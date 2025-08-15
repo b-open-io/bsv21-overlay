@@ -47,11 +47,11 @@ func main() {
 
 	// Set up Redis connection for queue management
 	// Note: sub command uses Redis directly for queue operations
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		redisURL = "redis://localhost:6379"
+	queueURL := os.Getenv("QUEUE_URL")
+	if queueURL == "" {
+		queueURL = "redis://localhost:6379"
 	}
-	opts, err := redis.ParseURL(redisURL)
+	opts, err := redis.ParseURL(queueURL)
 	if err != nil {
 		log.Fatalf("Failed to parse Redis URL: %v", err)
 	}
@@ -59,9 +59,9 @@ func main() {
 	defer redisClient.Close()
 
 	// Set up JungleBus connection
-	jungleBusURL := os.Getenv("JUNGLEBUS")
+	jungleBusURL := os.Getenv("JUNGLEBUS_URL")
 	if jungleBusURL == "" {
-		log.Fatalf("JUNGLEBUS environment variable is required")
+		log.Fatalf("JUNGLEBUS_URL environment variable is required")
 	}
 	jbClient, err := junglebus.New(junglebus.WithHTTP(jungleBusURL))
 	if err != nil {

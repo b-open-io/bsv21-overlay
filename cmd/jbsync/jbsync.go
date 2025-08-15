@@ -59,6 +59,12 @@ type tokenSummary struct {
 }
 
 var (
+	// Configuration from flags/env
+	eventsURL    string
+	beefURL      string
+	publisherURL string
+	envFile      string
+	
 	// Debug flags to control which components run
 	runJungleBus     bool
 	runQueueProc     bool
@@ -68,57 +74,49 @@ var (
 )
 
 func init() {
-	// Command line flags
-	var envFile string
-	var eventStorageFlag string
-	var beefStorageFlag string
-	var publisherURLFlag string
+	// Parse .env file path first
+	flag.StringVar(&envFile, "env", ".env", "Path to .env file")
+	flag.Parse()
+	godotenv.Load(envFile)
 	
-	flag.StringVar(&topicID, "topic", "", "Topic ID to subscribe to (required)")
+	// Reset flags for second parse with env vars loaded
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	
+	// Configuration flags with env var defaults
+	flag.StringVar(&topicID, "topic", os.Getenv("BSV21_TOPIC"), "Topic ID to subscribe to")
+	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
+	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
+	flag.StringVar(&publisherURL, "publisher", os.Getenv("PUBLISHER_URL"), "Publisher URL")
 	flag.StringVar(&envFile, "env", ".env", "Path to .env file")
 	
-	// Storage configuration flags
-	flag.StringVar(&eventStorageFlag, "events", "", "Event storage URL (e.g., mongodb://localhost:27017/bsv21)")
-	flag.StringVar(&beefStorageFlag, "beef", "", "BEEF storage URL (e.g., redis://localhost:6379)")
-	flag.StringVar(&publisherURLFlag, "publisher", "", "Publisher URL (e.g., redis://localhost:6379)")
-
 	// Debug flags to enable/disable components
 	flag.BoolVar(&runJungleBus, "jb", true, "Enable JungleBus subscriber")
 	flag.BoolVar(&runQueueProc, "queue", true, "Enable queue processor")
 	flag.BoolVar(&runTokenProc, "token", true, "Enable token processor")
-	flag.IntVar(&queueConcurrency, "queue-limit", 16, "Queue processor concurrency limit")
-	flag.IntVar(&tokenConcurrency, "token-limit", 16, "Token processor concurrency limit")
+	flag.IntVar(&queueConcurrency, "qlimit", 16, "Queue processor concurrency")
+	flag.IntVar(&tokenConcurrency, "tlimit", 16, "Token processor concurrency")
 	flag.Parse()
 
-	// Load environment configuration
-	godotenv.Load(envFile)
-
-	// Check topic ID only if JungleBus is enabled
-	if runJungleBus {
-		if topicID == "" {
-			topicID = os.Getenv("BSV21_TOPIC")
-			if topicID == "" {
-				log.Fatal("Topic ID is required when JungleBus is enabled. Use -topic flag or set BSV21_TOPIC environment variable")
-			}
-		}
+	// Apply defaults
+	if beefURL == "" {
+		beefURL = "./beef_storage"
 	}
-
-	// Publisher URL is needed for event publishing
-	publisherURL := os.Getenv("PUBLISHER_URL")
-	if publisherURL == "" {
-		publisherURL = "redis://localhost:6379"
+	
+	// Validate required configuration
+	if runJungleBus && topicID == "" {
+		log.Fatal("Topic ID is required when JungleBus is enabled. Use -topic flag or set BSV21_TOPIC environment variable")
 	}
 
 	// Set up chain tracker
 	chaintracker = &headers_client.Client{
-		Url:    os.Getenv("BLOCK_HEADERS_URL"),
-		ApiKey: os.Getenv("BLOCK_HEADERS_API_KEY"),
+		Url:    os.Getenv("HEADERS_URL"),
+		ApiKey: os.Getenv("HEADERS_KEY"),
 	}
 
 	// Set up JungleBus connection
-	jungleBusURL := os.Getenv("JUNGLEBUS")
+	jungleBusURL := os.Getenv("JUNGLEBUS_URL")
 	if jungleBusURL == "" {
-		log.Fatalf("JUNGLEBUS environment variable is required")
+		log.Fatalf("JUNGLEBUS_URL environment variable is required")
 	}
 	var err error
 	jbClient, err = junglebus.New(junglebus.WithHTTP(jungleBusURL))
@@ -126,23 +124,8 @@ func init() {
 		log.Fatalf("Failed to create JungleBus client: %v", err)
 	}
 
-	// Create storage using the configuration approach
-	// Command-line flags override environment variables
-	if eventStorageFlag == "" {
-		eventStorageFlag = os.Getenv("EVENT_STORAGE")
-	}
-	if beefStorageFlag == "" {
-		beefStorageFlag = os.Getenv("BEEF_STORAGE")
-		if beefStorageFlag == "" {
-			// Default to filesystem storage if nothing specified
-			beefStorageFlag = "./beef_storage"
-		}
-	}
-	if publisherURLFlag == "" {
-		publisherURLFlag = publisherURL // Use the publisherURL we already parsed
-	}
-
-	eventStorage, err = config.CreateEventStorage(eventStorageFlag, beefStorageFlag, publisherURLFlag)
+	// Create storage using the cleaned up configuration
+	eventStorage, err = config.CreateEventStorage(eventsURL, beefURL, publisherURL)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}

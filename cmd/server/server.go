@@ -37,36 +37,49 @@ var topicClientsMutex = &sync.Mutex{}               // Mutex to protect topicCli
 var peers = []string{}
 var e *engine.Engine
 
-// Command-line flags for storage configuration
+// Configuration from flags/env
 var (
-	eventStorageFlag string
-	beefStorageFlag  string
-	publisherURLFlag string
+	eventsURL    string
+	beefURL      string
+	publisherURL string
 )
 
 func init() {
 	godotenv.Load(".env")
+	
+	// Set up chain tracker
 	chaintracker = &headers_client.Client{
-		Url:    os.Getenv("BLOCK_HEADERS_URL"),
-		ApiKey: os.Getenv("BLOCK_HEADERS_API_KEY"),
+		Url:    os.Getenv("HEADERS_URL"),
+		ApiKey: os.Getenv("HEADERS_KEY"),
 	}
+	
+	// Parse PORT from env before flags
 	PORT, _ = strconv.Atoi(os.Getenv("PORT"))
-
-	// Define command-line flags
+	
+	// Define command-line flags with env var defaults
 	flag.IntVar(&PORT, "p", PORT, "Port to listen on")
 	flag.BoolVar(&SYNC, "s", false, "Start sync")
-	flag.StringVar(&eventStorageFlag, "events", "", "Event storage URL (e.g., mongodb://localhost:27017/bsv21)")
-	flag.StringVar(&beefStorageFlag, "beef", "", "BEEF storage URL (e.g., redis://localhost:6379)")
-	flag.StringVar(&publisherURLFlag, "publisher", "", "Publisher URL (e.g., redis://localhost:6379)")
+	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
+	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
+	flag.StringVar(&publisherURL, "publisher", os.Getenv("PUBLISHER_URL"), "Publisher URL")
 	flag.Parse()
+	// Apply defaults
 	if PORT == 0 {
 		PORT = 3000
 	}
-	if redisOpts, err := redis.ParseURL(os.Getenv("REDIS_URL")); err != nil {
-		log.Fatalf("Failed to parse Redis URL: %v", err)
-	} else {
-		rdb = redis.NewClient(redisOpts)
-		sub = redis.NewClient(redisOpts)
+	if beefURL == "" {
+		beefURL = "./beef_storage"
+	}
+	
+	// Set up Redis clients for pub/sub subscriptions (if publisher URL is provided)
+	// TODO: This will be refactored into a PubSub interface
+	if publisherURL != "" {
+		if redisOpts, err := redis.ParseURL(publisherURL); err != nil {
+			log.Fatalf("Failed to parse publisher URL for subscriptions: %v", err)
+		} else {
+			rdb = redis.NewClient(redisOpts)
+			sub = redis.NewClient(redisOpts)
+		}
 	}
 	PEERS := os.Getenv("PEERS")
 	if PEERS != "" {
@@ -156,19 +169,9 @@ func main() {
 
 	hostingUrl := os.Getenv("HOSTING_URL")
 
-	// Create storage using the new configuration approach
-	// Command-line flags override environment variables
-	// If beefStorageFlag is empty, use BEEF_STORAGE environment variable
-	if beefStorageFlag == "" {
-		beefStorageFlag = os.Getenv("BEEF_STORAGE")
-		if beefStorageFlag == "" {
-			// Default to filesystem storage if nothing specified
-			beefStorageFlag = "./beef_storage"
-		}
-	}
-	
+	// Create storage using the cleaned up configuration
 	var err error
-	store, err = config.CreateEventStorage(eventStorageFlag, beefStorageFlag, publisherURLFlag)
+	store, err = config.CreateEventStorage(eventsURL, beefURL, publisherURL)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
@@ -195,13 +198,14 @@ func main() {
 		ChainTracker: chaintracker,
 	}
 
-	// Load topic managers dynamically from Redis whitelist
+	// Load topic managers dynamically from whitelist (using EventDataStorage)
 	const whitelistKey = "bsv21:whitelist"
-	if tokens, err := rdb.SMembers(ctx, whitelistKey).Result(); err != nil {
-		log.Fatalf("Failed to get whitelisted tokens from Redis: %v", err)
-	} else {
-		log.Printf("Loading whitelisted tokens: %v", tokens)
-		for _, tokenId := range tokens {
+	tokens, err := store.SMembers(ctx, whitelistKey)
+	if err != nil {
+		log.Fatalf("Failed to get whitelisted tokens: %v", err)
+	}
+	log.Printf("Loading whitelisted tokens: %v", tokens)
+	for _, tokenId := range tokens {
 			topicName := "tm_" + tokenId
 			log.Println("Adding topic manager:", topicName)
 			e.Managers[topicName] = topics.NewBsv21ValidatedTopicManager(
@@ -213,7 +217,6 @@ func main() {
 				Type:  engine.SyncConfigurationPeers,
 				Peers: peers,
 			}
-		}
 	}
 
 	// Start GASP sync if requested

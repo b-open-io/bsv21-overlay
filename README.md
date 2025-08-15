@@ -54,25 +54,25 @@ The service uses connection strings that auto-detect the storage type:
 
 ```bash
 # Event Storage (Required - auto-detects type from URL)
-export EVENT_STORAGE=mongodb://user:pass@localhost:27017/bsv21?authSource=admin  # MongoDB
+export EVENTS_URL=mongodb://user:pass@localhost:27017/bsv21?authSource=admin  # MongoDB
 # OR
-export EVENT_STORAGE=redis://localhost:6379           # Redis
+export EVENTS_URL=redis://localhost:6379           # Redis
 # OR
-export EVENT_STORAGE=./overlay.db                     # SQLite (local file)
+export EVENTS_URL=./overlay.db                     # SQLite (local file)
 
 # BEEF Storage (Optional - defaults to ./beef_storage/)
 # Single storage backend:
-export BEEF_STORAGE=redis://localhost:6379            # Redis (recommended for production)
+export BEEF_URL=redis://localhost:6379            # Redis (recommended for production)
 # OR
-export BEEF_STORAGE=mongodb://user:pass@localhost:27017/beef?authSource=admin    # MongoDB
+export BEEF_URL=mongodb://user:pass@localhost:27017/beef?authSource=admin    # MongoDB
 # OR
-export BEEF_STORAGE=./beef.db                         # SQLite
+export BEEF_URL=./beef.db                         # SQLite
 # OR leave unset to use ./beef_storage/ directory     # Filesystem (default)
 
 # Hierarchical storage (stack multiple backends):
-export BEEF_STORAGE='["lru://1gb", "redis://localhost:6379", "junglebus://"]'  # JSON array
+export BEEF_URL='["lru://1gb", "redis://localhost:6379", "junglebus://"]'  # JSON array
 # OR
-export BEEF_STORAGE="lru://100mb,redis://localhost:6379,junglebus://"         # Comma-separated
+export BEEF_URL="lru://100mb,redis://localhost:6379,junglebus://"         # Comma-separated
 
 # Publisher Configuration (Optional - needed for real-time events)
 export PUBLISHER_URL=redis://localhost:6379           # Publisher for pub/sub (optional)
@@ -82,8 +82,8 @@ export PORT=3000
 export HOSTING_URL=http://localhost:3000
 
 # Block Headers Service (for SPV validation)
-export BLOCK_HEADERS_URL=https://api.whatsonchain.com/v1/bsv/main/block
-export BLOCK_HEADERS_API_KEY=your_api_key
+export HEADERS_URL=https://api.whatsonchain.com/v1/bsv/main/block
+export HEADERS_KEY=your_api_key
 
 # Optional: Peer sync for horizontal scaling
 export PEERS=http://peer1:3000,http://peer2:3000
@@ -98,21 +98,21 @@ export ARC_CALLBACK_TOKEN=your_callback_token
 **Development (minimal setup):**
 ```bash
 export PUBLISHER_URL=redis://localhost:6379
-# EVENT_STORAGE defaults to ./overlay.db
-# BEEF_STORAGE defaults to ./beef_storage/
+# EVENTS_URL defaults to ./overlay.db
+# BEEF_URL defaults to ./beef_storage/
 ```
 
 **Production (high performance):**
 ```bash
-export EVENT_STORAGE=mongodb://user:pass@localhost:27017/bsv21?authSource=admin
-export BEEF_STORAGE=redis://localhost:6379
+export EVENTS_URL=mongodb://user:pass@localhost:27017/bsv21?authSource=admin
+export BEEF_URL=redis://localhost:6379
 export PUBLISHER_URL=redis://localhost:6379
 ```
 
 **All Redis:**
 ```bash
-export EVENT_STORAGE=redis://localhost:6379
-export BEEF_STORAGE=redis://localhost:6379
+export EVENTS_URL=redis://localhost:6379
+export BEEF_URL=redis://localhost:6379
 export PUBLISHER_URL=redis://localhost:6379
 ```
 
@@ -128,7 +128,7 @@ For development convenience, you can create a `.env` file in the project root wi
 ./server.run -p 8080
 
 # Or run with environment variables set inline
-EVENT_STORAGE=mongodb://user:pass@mongo-host:27017/bsv21?authSource=admin BEEF_STORAGE=redis://redis-host:6379 ./server.run
+EVENTS_URL=mongodb://user:pass@mongo-host:27017/bsv21?authSource=admin BEEF_URL=redis://redis-host:6379 ./server.run
 ```
 
 The server will start on port 3000 by default. You can now:
@@ -341,7 +341,7 @@ Stores raw transaction data (BEEF - Bitcoin Extended Format) for SPV validation.
 - **Redis** (`redis://...`): High-performance key-value storage (recommended for production)
 - **MongoDB** (`mongodb://...`): Document storage with GridFS for large transactions
 - **SQLite** (`./beef.db`): Local file database for development
-- **Filesystem** (`./beef_storage/`): Directory-based storage (default if `BEEF_STORAGE` not set)
+- **Filesystem** (`./beef_storage/`): Directory-based storage (default if `BEEF_URL` not set)
 - **JungleBus** (`junglebus://`): Fetches from JungleBus API (read-only)
 
 **Hierarchical Storage:**
@@ -367,15 +367,15 @@ You can stack multiple storage backends to create a hierarchical cache system. E
 
 ```bash
 # High-performance production stack
-export BEEF_STORAGE='["lru://1gb", "redis://localhost:6379", "sqlite://./beef.db", "junglebus://"]'
+export BEEF_URL='["lru://1gb", "redis://localhost:6379", "sqlite://./beef.db", "junglebus://"]'
 # Data flows: Memory → Redis → SQLite → JungleBus API
 
 # Development stack with fallback
-export BEEF_STORAGE="lru://100mb,./beef.db,junglebus://"
+export BEEF_URL="lru://100mb,./beef.db,junglebus://"
 # Data flows: Memory → Local SQLite → JungleBus API
 
 # Simple Redis with JungleBus fallback
-export BEEF_STORAGE="redis://localhost:6379,junglebus://"
+export BEEF_URL="redis://localhost:6379,junglebus://"
 # Data flows: Redis → JungleBus API
 ```
 

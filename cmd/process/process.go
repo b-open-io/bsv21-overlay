@@ -45,8 +45,8 @@ func init() {
 
 	// Set up chain tracker
 	chaintracker = &headers_client.Client{
-		Url:    os.Getenv("BLOCK_HEADERS_URL"),
-		ApiKey: os.Getenv("BLOCK_HEADERS_API_KEY"),
+		Url:    os.Getenv("HEADERS_URL"),
+		ApiKey: os.Getenv("HEADERS_KEY"),
 	}
 }
 
