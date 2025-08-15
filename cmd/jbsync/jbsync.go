@@ -60,10 +60,10 @@ type tokenSummary struct {
 
 var (
 	// Configuration from flags/env
-	eventsURL    string
-	beefURL      string
-	publisherURL string
-	envFile      string
+	eventsURL string
+	beefURL   string
+	pubsubURL string
+	envFile   string
 	
 	// Debug flags to control which components run
 	runJungleBus     bool
@@ -86,7 +86,7 @@ func init() {
 	flag.StringVar(&topicID, "topic", os.Getenv("BSV21_TOPIC"), "Topic ID to subscribe to")
 	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
 	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
-	flag.StringVar(&publisherURL, "publisher", os.Getenv("PUBLISHER_URL"), "Publisher URL")
+	flag.StringVar(&pubsubURL, "pubsub", os.Getenv("PUBSUB_URL"), "PubSub URL")
 	flag.StringVar(&envFile, "env", ".env", "Path to .env file")
 	
 	// Debug flags to enable/disable components
@@ -125,7 +125,7 @@ func init() {
 	}
 
 	// Create storage using the cleaned up configuration
-	eventStorage, err = config.CreateEventStorage(eventsURL, beefURL, publisherURL)
+	eventStorage, err = config.CreateEventStorage(eventsURL, beefURL, pubsubURL)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}

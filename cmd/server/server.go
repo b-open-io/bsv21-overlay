@@ -16,6 +16,7 @@ import (
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/config"
+	"github.com/b-open-io/overlay/publish"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
@@ -25,13 +26,12 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
-	"github.com/redis/go-redis/v9"
 )
 
 var chaintracker *headers_client.Client
 var PORT int
 var SYNC bool
-var rdb, sub *redis.Client
+var pubsub publish.PubSub  // PubSub interface instead of direct Redis
 var topicClients = make(map[string][]*bufio.Writer) // Map of topic to connected clients
 var topicClientsMutex = &sync.Mutex{}               // Mutex to protect topicClients
 var peers = []string{}
@@ -39,9 +39,9 @@ var e *engine.Engine
 
 // Configuration from flags/env
 var (
-	eventsURL    string
-	beefURL      string
-	publisherURL string
+	eventsURL string
+	beefURL   string
+	pubsubURL string
 )
 
 func init() {
@@ -61,7 +61,7 @@ func init() {
 	flag.BoolVar(&SYNC, "s", false, "Start sync")
 	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
 	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
-	flag.StringVar(&publisherURL, "publisher", os.Getenv("PUBLISHER_URL"), "Publisher URL")
+	flag.StringVar(&pubsubURL, "pubsub", os.Getenv("PUBSUB_URL"), "PubSub URL for events")
 	flag.Parse()
 	// Apply defaults
 	if PORT == 0 {
@@ -71,14 +71,12 @@ func init() {
 		beefURL = "./beef_storage"
 	}
 	
-	// Set up Redis clients for pub/sub subscriptions (if publisher URL is provided)
-	// TODO: This will be refactored into a PubSub interface
-	if publisherURL != "" {
-		if redisOpts, err := redis.ParseURL(publisherURL); err != nil {
-			log.Fatalf("Failed to parse publisher URL for subscriptions: %v", err)
-		} else {
-			rdb = redis.NewClient(redisOpts)
-			sub = redis.NewClient(redisOpts)
+	// Set up PubSub client (if URL is provided)
+	if pubsubURL != "" {
+		var err error
+		pubsub, err = publish.NewRedisPubSub(pubsubURL)
+		if err != nil {
+			log.Fatalf("Failed to create PubSub client: %v", err)
 		}
 	}
 	PEERS := os.Getenv("PEERS")
@@ -89,15 +87,23 @@ func init() {
 
 // broadcastMessages handles real-time event broadcasting
 func broadcastMessages(ctx context.Context) {
-	pubsub := sub.PSubscribe(ctx, "*")
-	defer pubsub.Close()
-
-	ch := pubsub.Channel()
+	if pubsub == nil {
+		log.Println("No PubSub configured, real-time broadcasting disabled")
+		return
+	}
+	
+	// Subscribe to all channels
+	msgChan, err := pubsub.PSubscribe(ctx, "*")
+	if err != nil {
+		log.Printf("Failed to subscribe to events: %v", err)
+		return
+	}
+	
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case msg := <-ch:
+		case msg := <-msgChan:
 			// Get the list of clients for the topic
 			topicClientsMutex.Lock()
 			clients := topicClients[msg.Channel]
@@ -139,12 +145,9 @@ func main() {
 		log.Println("Shutting down server...")
 		cancel()
 
-		// Close database connections
-		if rdb != nil {
-			rdb.Close()
-		}
-		if sub != nil {
-			sub.Close()
+		// Close PubSub connection
+		if pubsub != nil {
+			pubsub.Close()
 		}
 
 		// Close storage and lookup services
@@ -171,7 +174,7 @@ func main() {
 
 	// Create storage using the cleaned up configuration
 	var err error
-	store, err = config.CreateEventStorage(eventsURL, beefURL, publisherURL)
+	store, err = config.CreateEventStorage(eventsURL, beefURL, pubsubURL)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}

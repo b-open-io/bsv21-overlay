@@ -74,8 +74,8 @@ export BEEF_URL='["lru://1gb", "redis://localhost:6379", "junglebus://"]'  # JSO
 # OR
 export BEEF_URL="lru://100mb,redis://localhost:6379,junglebus://"         # Comma-separated
 
-# Publisher Configuration (Optional - needed for real-time events)
-export PUBLISHER_URL=redis://localhost:6379           # Publisher for pub/sub (optional)
+# PubSub Configuration (Optional - needed for real-time events)
+export PUBSUB_URL=redis://localhost:6379              # PubSub for events (optional)
 
 # Service Configuration
 export PORT=3000
@@ -97,7 +97,7 @@ export ARC_CALLBACK_TOKEN=your_callback_token
 
 **Development (minimal setup):**
 ```bash
-export PUBLISHER_URL=redis://localhost:6379
+export PUBSUB_URL=redis://localhost:6379
 # EVENTS_URL defaults to ./overlay.db
 # BEEF_URL defaults to ./beef_storage/
 ```
@@ -106,14 +106,14 @@ export PUBLISHER_URL=redis://localhost:6379
 ```bash
 export EVENTS_URL=mongodb://user:pass@localhost:27017/bsv21?authSource=admin
 export BEEF_URL=redis://localhost:6379
-export PUBLISHER_URL=redis://localhost:6379
+export PUBSUB_URL=redis://localhost:6379
 ```
 
 **All Redis:**
 ```bash
 export EVENTS_URL=redis://localhost:6379
 export BEEF_URL=redis://localhost:6379
-export PUBLISHER_URL=redis://localhost:6379
+export PUBSUB_URL=redis://localhost:6379
 ```
 
 For development convenience, you can create a `.env` file in the project root with these variables (without the `export` prefix), which will be automatically loaded when running from the source directory.
@@ -393,7 +393,7 @@ Stores processed BSV21 events with indexing for efficient queries.
 - **Redis** (`redis://...`): High-performance in-memory event storage
 - **SQLite** (`./overlay.db`): Lightweight file-based storage for single-node deployments
 
-Note: `PUBLISHER_URL` is optional. If not provided, the service won't publish real-time events but will still function normally for storage and queries.
+Note: `PUBSUB_URL` is optional. If not provided, the service won't publish or subscribe to real-time events but will still function normally for storage and queries.
 
 ### Event Value Storage
 

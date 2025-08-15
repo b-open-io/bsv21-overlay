@@ -7,8 +7,6 @@ github.com/apapsch/go-jsonmerge/v2 v2.0.0 h1:axGnT1gRIfimI7gJifB699GoE/oq+F2MU7D
 github.com/apapsch/go-jsonmerge/v2 v2.0.0/go.mod h1:lvDnEdqiQrp0O42VQGgmlKpxL1AP2+08jFMw88y4klk=
 github.com/b-open-io/go-templates v0.0.0-20250611003449-d3d47c4c4967 h1:O8Ghj6Y4sEZhC5eZBFHhdXQz/X+uN3qyifbOGYWiJd8=
 github.com/b-open-io/go-templates v0.0.0-20250611003449-d3d47c4c4967/go.mod h1:xFs0s0P1uT0cReDWg1kbTV1T/7Nm5yt42GKDn9bPjSw=
-github.com/b-open-io/overlay v0.0.0-20250815160204-8768dc846af3 h1:/jzPYJVeQwRciDNWfwfgompmzW0oBPyrP2Du8MA+1kM=
-github.com/b-open-io/overlay v0.0.0-20250815160204-8768dc846af3/go.mod h1:R65x/OsymcgVgiFd8g2F0I79fEAU/JSKIXEyErKsKU4=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
