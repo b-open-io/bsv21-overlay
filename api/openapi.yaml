@@ -196,38 +196,27 @@ paths:
     get:
       tags:
         - 1sat-bsv21
-      summary: Get token events
-      description: Returns all events for a specific BSV21 token
+      summary: Get token details
+      description: Returns BSV21 token metadata for a specific token ID
       parameters:
         - name: tokenId
           in: path
           required: true
           schema:
             type: string
-          description: Token ID to query
-        - name: from
-          in: query
-          schema:
-            type: number
-            format: float
-          description: Starting score for pagination
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 100
-          description: Maximum number of results to return
+          description: Token ID (outpoint string) to query
+          example: "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"
       responses:
         '200':
           description: Successful response
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/OutputData'
+                $ref: '#/components/schemas/BSV21TokenDetails'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -938,6 +927,42 @@ paths:
 components:
   schemas:
     # BSV21-specific schemas
+    BSV21TokenDetails:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Token ID (ordinal string)
+          example: "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"
+        txid:
+          type: string
+          description: Mint transaction ID
+          example: "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127"
+        vout:
+          type: integer
+          description: Output index
+          example: 0
+        op:
+          type: string
+          description: Operation type
+          example: "deploy+mint"
+        amt:
+          type: string
+          description: Token amount (as string to preserve precision)
+          example: "1000000"
+        sym:
+          type: string
+          description: Token symbol
+          example: "GOLD"
+        dec:
+          type: integer
+          description: Decimal places
+          example: 8
+        icon:
+          type: string
+          description: Token icon URL
+          example: "https://example.com/icon.png"
+
     BSV21BalanceResponse:
       type: object
       properties:
