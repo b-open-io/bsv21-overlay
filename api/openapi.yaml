@@ -28,12 +28,12 @@ tags:
 
 paths:
   # BSV21-specific routes
-  /api/1sat/events/{event}:
+  /api/1sat/events/{event}/history:
     get:
       tags:
         - 1sat-events
-      summary: Query events by type
-      description: Returns all outputs matching the specified event type
+      summary: Query event history by type
+      description: Returns complete history (spent and unspent) for the specified event type
       parameters:
         - name: event
           in: path
@@ -61,7 +61,50 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/BSV21EventResponse'
+                  $ref: '#/components/schemas/OutputData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/1sat/events/history:
+    post:
+      tags:
+        - 1sat-events
+      summary: Query event history for multiple event types
+      description: Returns complete history (spent and unspent) for multiple event types
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Starting score for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of results to return
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+              description: List of event types to query
+              maxItems: 100
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OutputData'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -100,7 +143,50 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/BSV21EventResponse'
+                  $ref: '#/components/schemas/OutputData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/1sat/events/unspent:
+    post:
+      tags:
+        - 1sat-events
+      summary: Query unspent events for multiple event types
+      description: Returns only unspent outputs for multiple event types
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Starting score for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of results to return
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+              description: List of event types to query
+              maxItems: 100
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OutputData'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -178,6 +264,110 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/1sat/bsv21/{tokenId}/{lockType}/{address}/history:
+    get:
+      tags:
+        - 1sat-bsv21
+      summary: Get token transaction history for address
+      description: Returns complete transaction history (spent and unspent) for a specific address and lock type
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Token ID
+        - name: lockType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [p2pkh, cos, ltm, pow20, list]
+          description: Lock type
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Address to query history for
+        - name: from
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Starting score for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of results to return
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OutputData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/1sat/bsv21/{tokenId}/{lockType}/{address}/unspent:
+    get:
+      tags:
+        - 1sat-bsv21
+      summary: Get unspent token outputs for address
+      description: Returns only unspent token outputs for a specific address and lock type
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Token ID
+        - name: lockType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [p2pkh, cos, ltm, pow20, list]
+          description: Lock type
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Address to query unspent outputs for
+        - name: from
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Starting score for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of results to return
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OutputData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/1sat/bsv21/{tokenId}/{lockType}/{address}/balance:
     get:
       tags:
@@ -211,6 +401,118 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BSV21BalanceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/1sat/bsv21/{tokenId}/{lockType}/history:
+    post:
+      tags:
+        - 1sat-bsv21
+      summary: Get token transaction history for multiple addresses
+      description: Returns complete transaction history (spent and unspent) for multiple addresses of a specific lock type
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Token ID
+        - name: lockType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [p2pkh, cos, ltm, pow20, list]
+          description: Lock type
+        - name: from
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Starting score for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of results to return
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+              description: List of addresses to query history for
+              maxItems: 100
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OutputData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/1sat/bsv21/{tokenId}/{lockType}/unspent:
+    post:
+      tags:
+        - 1sat-bsv21
+      summary: Get unspent token outputs for multiple addresses
+      description: Returns only unspent token outputs for multiple addresses of a specific lock type
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Token ID
+        - name: lockType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [p2pkh, cos, ltm, pow20, list]
+          description: Lock type
+        - name: from
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Starting score for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of results to return
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+              description: List of addresses to query unspent outputs for
+              maxItems: 100
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OutputData'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -303,19 +605,19 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/1sat/subscribe/{topics}:
+  /api/1sat/subscribe/{events}:
     get:
       tags:
         - 1sat-events
       summary: Subscribe to real-time events
       description: Server-sent events stream for real-time BSV21 events
       parameters:
-        - name: topics
+        - name: events
           in: path
           required: true
           schema:
             type: string
-          description: Comma-separated list of topics to subscribe to
+          description: Comma-separated list of events to subscribe to
       responses:
         '200':
           description: Server-sent event stream
@@ -636,23 +938,6 @@ paths:
 components:
   schemas:
     # BSV21-specific schemas
-    BSV21EventResponse:
-      type: object
-      properties:
-        outpoint:
-          type: string
-          example: "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127.0"
-          description: Transaction outpoint (txid.vout)
-        score:
-          type: number
-          format: float
-          example: 902578.000001234
-          description: Event score for ordering/pagination
-        data:
-          type: object
-          additionalProperties: true
-          description: Event-specific data
-
     BSV21BalanceResponse:
       type: object
       properties:
@@ -686,22 +971,32 @@ components:
       properties:
         txid:
           type: string
-          description: Source transaction ID (only for inputs)
+          description: Transaction ID for inputs (source) or outputs (current)
         vout:
           type: integer
           description: Output index
         data:
           type: object
           additionalProperties: true
-          description: Protocol-specific data
+          description: Protocol-specific data (BSV21 token data)
         script:
           type: string
           format: byte
-          description: Locking script
+          description: Locking script in hex format
         satoshis:
           type: integer
           format: int64
           description: Output value in satoshis
+        spend:
+          type: string
+          description: Spending transaction ID (null if unspent)
+          example: "def456...abc"
+          nullable: true
+        score:
+          type: number
+          format: float
+          description: Sort score for ordering and pagination
+          example: 902578.000001234
 
     BlockHeader:
       type: object

@@ -17,7 +17,6 @@ import (
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/storage"
-	"github.com/redis/go-redis/v9"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
 	"github.com/bsv-blockchain/go-sdk/transaction"
@@ -26,12 +25,13 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 )
 
 var chaintracker *headers_client.Client
 var PORT int
 var SYNC bool
-var redisClient *redis.Client  // Redis client for pub/sub and queue operations
+var redisClient *redis.Client                       // Redis client for pub/sub and queue operations
 var topicClients = make(map[string][]*bufio.Writer) // Map of topic to connected clients
 var topicClientsMutex = &sync.Mutex{}               // Mutex to protect topicClients
 var peers = []string{}
@@ -46,16 +46,16 @@ var (
 
 func init() {
 	godotenv.Load(".env")
-	
+
 	// Set up chain tracker
 	chaintracker = &headers_client.Client{
 		Url:    os.Getenv("HEADERS_URL"),
 		ApiKey: os.Getenv("HEADERS_KEY"),
 	}
-	
+
 	// Parse PORT from env before flags
 	PORT, _ = strconv.Atoi(os.Getenv("PORT"))
-	
+
 	// Define command-line flags with env var defaults
 	flag.IntVar(&PORT, "p", PORT, "Port to listen on")
 	flag.BoolVar(&SYNC, "s", false, "Start sync")
@@ -70,7 +70,7 @@ func init() {
 	if beefURL == "" {
 		beefURL = "./beef_storage"
 	}
-	
+
 	// Set up Redis client (if URL is provided)
 	if redisURL != "" {
 		opts, err := redis.ParseURL(redisURL)
@@ -78,7 +78,7 @@ func init() {
 			log.Fatalf("Failed to parse Redis URL: %v", err)
 		}
 		redisClient = redis.NewClient(opts)
-		
+
 		// Test connection
 		ctx := context.Background()
 		if err := redisClient.Ping(ctx).Err(); err != nil {
@@ -97,13 +97,13 @@ func broadcastMessages(ctx context.Context) {
 		log.Println("No Redis configured, real-time broadcasting disabled")
 		return
 	}
-	
+
 	// Subscribe to all channels
 	pubsub := redisClient.PSubscribe(ctx, "*")
 	defer pubsub.Close()
-	
+
 	msgChan := pubsub.Channel()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -189,7 +189,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
-	
+
 	// Get Redis client from storage if we don't already have one
 	if redisClient == nil {
 		redisClient = store.GetRedisClient()
@@ -222,17 +222,17 @@ func main() {
 	}
 	log.Printf("Loading whitelisted tokens: %v", tokens)
 	for _, tokenId := range tokens {
-			topicName := "tm_" + tokenId
-			log.Println("Adding topic manager:", topicName)
-			e.Managers[topicName] = topics.NewBsv21ValidatedTopicManager(
-				topicName,
-				store,
-				[]string{tokenId},
-			)
-			e.SyncConfiguration[topicName] = engine.SyncConfiguration{
-				Type:  engine.SyncConfigurationPeers,
-				Peers: peers,
-			}
+		topicName := "tm_" + tokenId
+		log.Println("Adding topic manager:", topicName)
+		e.Managers[topicName] = topics.NewBsv21ValidatedTopicManager(
+			topicName,
+			store,
+			[]string{tokenId},
+		)
+		e.SyncConfiguration[topicName] = engine.SyncConfiguration{
+			Type:  engine.SyncConfigurationPeers,
+			Peers: peers,
+		}
 	}
 
 	// Start GASP sync if requested
@@ -289,22 +289,65 @@ func main() {
 		}
 	}
 
-	// Route for all events
-	onesat.Get("/events/:event", func(c *fiber.Ctx) error {
+	// Route for event history
+	onesat.Get("/events/:event/history", func(c *fiber.Ctx) error {
 		event := c.Params("event")
-		log.Printf("Received request for all BSV21 events: %s", event)
+		log.Printf("Received request for BSV21 event history: %s", event)
 
-		// Build question and call storage directly
+		// Build question and call FindOutputData for history
 		question := parseEventQuery(c)
-		results, err := store.LookupOutpoints(c.Context(), question, true) // include data
+		question.Event = event
+		question.UnspentOnly = false // History includes all outputs
+		outputs, err := store.FindOutputData(c.Context(), question)
 		if err != nil {
-			log.Printf("Lookup error: %v", err)
+			log.Printf("History lookup error: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"message": err.Error(),
 			})
 		}
 
-		return c.JSON(results)
+		return c.JSON(outputs)
+	})
+
+	// POST route for multiple events history
+	onesat.Post("/events/history", func(c *fiber.Ctx) error {
+		// Parse the request body - accept array of events directly
+		var events []string
+		if err := c.BodyParser(&events); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Invalid request body",
+			})
+		}
+
+		if len(events) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "No events provided",
+			})
+		}
+
+		// Limit the number of events to prevent abuse
+		if len(events) > 100 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Too many events (max 100)",
+			})
+		}
+
+		log.Printf("Received multi-event history request for %d events", len(events))
+
+		// Parse query parameters for paging
+		question := parseEventQuery(c)
+		question.Events = events
+		question.UnspentOnly = false // History includes all outputs
+		
+		outputs, err := store.FindOutputData(c.Context(), question)
+		if err != nil {
+			log.Printf("History lookup error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to retrieve event history",
+			})
+		}
+
+		return c.JSON(outputs)
 	})
 
 	// Route for unspent events only
@@ -312,18 +355,60 @@ func main() {
 		event := c.Params("event")
 		log.Printf("Received request for unspent BSV21 events: %s", event)
 
-		// Build question and call storage directly
+		// Build question and call FindOutputData for unspent
 		question := parseEventQuery(c)
+		question.Event = event
 		question.UnspentOnly = true
-		results, err := store.LookupOutpoints(c.Context(), question, true) // include data
+		outputs, err := store.FindOutputData(c.Context(), question)
 		if err != nil {
-			log.Printf("Lookup error: %v", err)
+			log.Printf("Unspent lookup error: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"message": err.Error(),
 			})
 		}
 
-		return c.JSON(results)
+		return c.JSON(outputs)
+	})
+
+	// POST route for multiple events unspent
+	onesat.Post("/events/unspent", func(c *fiber.Ctx) error {
+		// Parse the request body - accept array of events directly
+		var events []string
+		if err := c.BodyParser(&events); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Invalid request body",
+			})
+		}
+
+		if len(events) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "No events provided",
+			})
+		}
+
+		// Limit the number of events to prevent abuse
+		if len(events) > 100 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Too many events (max 100)",
+			})
+		}
+
+		log.Printf("Received multi-event unspent request for %d events", len(events))
+
+		// Parse query parameters for paging
+		question := parseEventQuery(c)
+		question.Events = events
+		question.UnspentOnly = true
+		
+		outputs, err := store.FindOutputData(c.Context(), question)
+		if err != nil {
+			log.Printf("Unspent lookup error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to retrieve unspent events",
+			})
+		}
+
+		return c.JSON(outputs)
 	})
 
 	onesat.Get("/bsv21/:tokenId", func(c *fiber.Ctx) error {
@@ -442,6 +527,59 @@ func main() {
 		})
 	})
 
+	onesat.Get("/bsv21/:tokenId/:lockType/:address/history", func(c *fiber.Ctx) error {
+		tokenId := c.Params("tokenId")
+		lockType := c.Params("lockType")
+		address := c.Params("address")
+
+		// Build event string from lockType, address, and tokenId
+		event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+		log.Printf("Received history request for token %s, %s address %s", tokenId, lockType, address)
+
+		// Parse query parameters for paging
+		question := parseEventQuery(c)
+		question.Events = []string{event}
+		question.UnspentOnly = false // History includes all outputs
+		
+		outputs, err := store.FindOutputData(c.Context(), question)
+		if err != nil {
+			log.Printf("History lookup error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to retrieve output history",
+			})
+		}
+
+		return c.JSON(outputs)
+	})
+
+	onesat.Get("/bsv21/:tokenId/:lockType/:address/unspent", func(c *fiber.Ctx) error {
+		tokenId := c.Params("tokenId")
+		lockType := c.Params("lockType")
+		address := c.Params("address")
+
+		// Build event string from lockType, address, and tokenId
+		event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+		log.Printf("Received unspent request for token %s, %s address %s", tokenId, lockType, address)
+
+		// Get UTXOs for the single event using FindOutputData (now includes full data)
+		question := &storage.EventQuestion{
+			Events:      []string{event},
+			UnspentOnly: true,
+			From:        0,
+			Limit:       0, // No limit
+		}
+		
+		outputs, err := store.FindOutputData(c.Context(), question)
+		if err != nil {
+			log.Printf("Unspent lookup error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to retrieve unspent outputs",
+			})
+		}
+
+		return c.JSON(outputs)
+	})
+
 	// POST endpoint for multiple address balance queries
 	onesat.Post("/bsv21/:tokenId/:lockType/balance", func(c *fiber.Ctx) error {
 		tokenId := c.Params("tokenId")
@@ -490,6 +628,111 @@ func main() {
 			"balance":   balance,
 			"utxoCount": utxoCount,
 		})
+	})
+
+	// POST endpoint for multiple address history queries
+	onesat.Post("/bsv21/:tokenId/:lockType/history", func(c *fiber.Ctx) error {
+		tokenId := c.Params("tokenId")
+		lockType := c.Params("lockType")
+
+		// Parse the request body - accept array of addresses directly
+		var addresses []string
+		if err := c.BodyParser(&addresses); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Invalid request body",
+			})
+		}
+
+		if len(addresses) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "No addresses provided",
+			})
+		}
+
+		// Limit the number of addresses to prevent abuse
+		if len(addresses) > 100 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Too many addresses (max 100)",
+			})
+		}
+
+		log.Printf("Received multi-history request for token %s, %s for %d addresses", tokenId, lockType, len(addresses))
+
+		// Build event strings for all addresses
+		events := make([]string, 0, len(addresses))
+		for _, address := range addresses {
+			event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+			events = append(events, event)
+		}
+
+		// Parse query parameters for paging
+		question := parseEventQuery(c)
+		question.Events = events
+		question.UnspentOnly = false // History includes all outputs
+		
+		outputs, err := store.FindOutputData(c.Context(), question)
+		if err != nil {
+			log.Printf("History lookup error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to retrieve output history",
+			})
+		}
+
+		return c.JSON(outputs)
+	})
+
+	// POST endpoint for multiple address unspent queries
+	onesat.Post("/bsv21/:tokenId/:lockType/unspent", func(c *fiber.Ctx) error {
+		tokenId := c.Params("tokenId")
+		lockType := c.Params("lockType")
+
+		// Parse the request body - accept array of addresses directly
+		var addresses []string
+		if err := c.BodyParser(&addresses); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Invalid request body",
+			})
+		}
+
+		if len(addresses) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "No addresses provided",
+			})
+		}
+
+		// Limit the number of addresses to prevent abuse
+		if len(addresses) > 100 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Too many addresses (max 100)",
+			})
+		}
+
+		log.Printf("Received multi-unspent request for token %s, %s for %d addresses", tokenId, lockType, len(addresses))
+
+		// Build event strings for all addresses
+		events := make([]string, 0, len(addresses))
+		for _, address := range addresses {
+			event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+			events = append(events, event)
+		}
+
+		// Get UTXOs for all addresses combined using FindOutputData
+		question := &storage.EventQuestion{
+			Events:      events,
+			UnspentOnly: true,
+			From:        0,
+			Limit:       0, // No limit
+		}
+		
+		outputs, err := store.FindOutputData(c.Context(), question)
+		if err != nil {
+			log.Printf("Unspent lookup error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to retrieve unspent outputs",
+			})
+		}
+
+		return c.JSON(outputs)
 	})
 
 	onesat.Get("/block/tip", func(c *fiber.Ctx) error {
@@ -550,9 +793,9 @@ func main() {
 	})
 
 	// Add custom BSV21-specific routes
-	onesat.Get("/subscribe/:topics", func(c *fiber.Ctx) error {
-		topics := strings.Split(c.Params("topics"), ",")
-		log.Printf("Subscription request for topics: %v", topics)
+	onesat.Get("/subscribe/:events", func(c *fiber.Ctx) error {
+		events := strings.Split(c.Params("events"), ",")
+		log.Printf("Subscription request for events: %v", events)
 
 		c.Set("Content-Type", "text/event-stream")
 		c.Set("Cache-Control", "no-cache")
@@ -574,10 +817,10 @@ func main() {
 
 		// If resuming, first send any missed events
 		if fromScore > 0 {
-			// For each topic, query events since the last score
-			for _, topic := range topics {
+			// For each event, query events since the last score
+			for _, event := range events {
 				question := &storage.EventQuestion{
-					Event: topic,
+					Event: event,
 					From:  fromScore,
 					Limit: 100,
 				}
@@ -594,15 +837,15 @@ func main() {
 			writer.Flush()
 		}
 
-		// Register the client for each topic
+		// Register the client for each event
 		topicClientsMutex.Lock()
-		for _, topic := range topics {
-			topicClients[topic] = append(topicClients[topic], writer)
+		for _, event := range events {
+			topicClients[event] = append(topicClients[event], writer)
 		}
 		topicClientsMutex.Unlock()
 
 		// Send initial message
-		fmt.Fprintf(writer, "data: Connected to topics: %s\n\n", strings.Join(topics, ", "))
+		fmt.Fprintf(writer, "data: Connected to events: %s\n\n", strings.Join(events, ", "))
 		writer.Flush()
 
 		// Keep the connection open
@@ -610,11 +853,11 @@ func main() {
 
 		// Remove the client when disconnected
 		topicClientsMutex.Lock()
-		for _, topic := range topics {
-			clients := topicClients[topic]
+		for _, event := range events {
+			clients := topicClients[event]
 			for i, client := range clients {
 				if client == writer {
-					topicClients[topic] = append(clients[:i], clients[i+1:]...)
+					topicClients[event] = append(clients[:i], clients[i+1:]...)
 					break
 				}
 			}

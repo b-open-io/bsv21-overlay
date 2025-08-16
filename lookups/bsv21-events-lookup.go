@@ -49,11 +49,11 @@ func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *
 			}
 		}
 	}
-	
+
 	// Decode the BSV21 data using the go-templates parser
 	if b := bsv21.Decode(payload.LockingScript); b != nil {
 		events := make([]string, 0, 5)
-		
+
 		// For mint operations, set the ID to the ordinal string
 		if b.Op == string(bsv21.OpMint) {
 			b.Id = payload.Outpoint.OrdinalString()
@@ -83,7 +83,7 @@ func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *
 			}
 		}
 		events = append(events, fmt.Sprintf("id:%s", b.Id))
-		
+
 		// Extract the address from the suffix script
 		var address string
 		suffix := script.NewFromBytes(b.Insc.ScriptSuffix)
@@ -104,18 +104,18 @@ func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *
 			}
 			events = append(events, fmt.Sprintf("list:%s", b.Id))
 		}
-		
+
 		// Create a clean data structure that matches the go-templates structure
 		// This structure will be stored directly without any mapping on retrieval
 		// Store amount as string to avoid BSON type conversion issues
 		// and maintain consistency across all storage implementations
-		
+
 		bsv21Data := map[string]interface{}{
 			"id":  b.Id,
 			"op":  b.Op,
 			"amt": strconv.FormatUint(b.Amt, 10), // Store as string
 		}
-		
+
 		// Add optional fields only if they exist
 		if b.Symbol != nil {
 			bsv21Data["sym"] = *b.Symbol
@@ -129,12 +129,12 @@ func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *
 		if address != "" {
 			bsv21Data["address"] = address
 		}
-		
+
 		// Store the BSV21 data under the "bsv21" key
 		dataToStore := map[string]interface{}{
 			"bsv21": bsv21Data,
 		}
-		
+
 		// Save all events with the data using the storage layer
 		if err := l.storage.SaveEvents(ctx, payload.Outpoint, events, blockHeight, blockIdx, dataToStore); err != nil {
 			return err
@@ -186,7 +186,6 @@ func (l *Bsv21EventsLookup) Lookup(ctx context.Context, question *lookup.LookupQ
 	}, nil
 }
 
-
 // GetBalance calculates the total balance of BSV21 tokens for given event patterns
 // Balance is always calculated for unspent outputs only
 func (l *Bsv21EventsLookup) GetBalance(ctx context.Context, events []string) (uint64, int, error) {
@@ -197,98 +196,98 @@ func (l *Bsv21EventsLookup) GetBalance(ctx context.Context, events []string) (ui
 		From:        0,
 		Limit:       0, // No limit - get all results
 	}
-	
+
 	results, err := l.storage.LookupOutpoints(ctx, question, true) // include data
 	if err != nil {
 		return 0, 0, err
 	}
-	
+
 	var totalBalance uint64
 	count := 0
-	
+
 	// Sum up amounts from BSV21 data
 	for _, result := range results {
 		if result.Data == nil {
 			continue
 		}
-		
+
 		// Access the data structure we control
 		dataMap, ok := result.Data.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		
+
 		// Extract BSV21 data
 		bsv21DataRaw, ok := dataMap["bsv21"]
 		if !ok {
 			continue
 		}
-		
+
 		bsv21Data, ok := bsv21DataRaw.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		
+
 		// Extract amount - we know it's stored as a string
 		amtStr, ok := bsv21Data["amt"].(string)
 		if !ok {
 			continue
 		}
-		
+
 		amt, err := strconv.ParseUint(amtStr, 10, 64)
 		if err != nil {
 			continue
 		}
-		
+
 		totalBalance += amt
 		count++
 	}
-	
+
 	return totalBalance, count, nil
 }
 
 // GetToken returns the mint transaction details for a specific BSV21 token (with caching)
 func (l *Bsv21EventsLookup) GetToken(ctx context.Context, outpoint *transaction.Outpoint) (map[string]interface{}, error) {
 	tokenId := outpoint.OrdinalString()
-	
+
 	// Check cache first - now caching the response map directly
 	if cached, ok := l.mintCache.Load(tokenId); ok {
 		return cached.(map[string]interface{}), nil
 	}
-	
+
 	// Not in cache, get the data for this specific outpoint
 	data, err := l.storage.GetOutputData(ctx, outpoint)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if data == nil {
 		return nil, fmt.Errorf("token data not found")
 	}
-	
+
 	// Access the data structure we control
 	dataMap, ok := data.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("invalid data format")
 	}
-	
+
 	// Extract BSV21 data
 	bsv21DataRaw, ok := dataMap["bsv21"]
 	if !ok {
 		return nil, fmt.Errorf("token data not found")
 	}
-	
+
 	bsv21Data, ok := bsv21DataRaw.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("invalid token data format")
 	}
-	
+
 	// Verify this is a mint transaction
 	op, ok := bsv21Data["op"].(string)
 	if !ok || op != "deploy+mint" {
 		return nil, fmt.Errorf("outpoint exists but is not a mint transaction (op=%s)", op)
 	}
-	
+
 	// Build response with all token details
 	response := map[string]interface{}{
 		"id":   tokenId,
@@ -296,27 +295,29 @@ func (l *Bsv21EventsLookup) GetToken(ctx context.Context, outpoint *transaction.
 		"vout": outpoint.Index,
 		"op":   op,
 	}
-	
+
 	// Add amount - already stored as string in bsv21Data
 	if amtStr, ok := bsv21Data["amt"].(string); ok {
 		response["amt"] = amtStr
 	}
-	
+
 	// Add optional fields if present
 	if sym, ok := bsv21Data["sym"].(string); ok {
 		response["sym"] = sym
 	}
-	
+
 	if dec, ok := bsv21Data["dec"].(float64); ok {
 		response["dec"] = uint8(dec)
 	}
-	
+
 	if icon, ok := bsv21Data["icon"].(string); ok {
 		response["icon"] = icon
 	}
-	
+
 	// Cache the response directly
 	l.mintCache.Store(tokenId, response)
-	
+
 	return response, nil
 }
+
+
