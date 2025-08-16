@@ -225,7 +225,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/BSV21EventResponse'
+                  $ref: '#/components/schemas/OutputData'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
