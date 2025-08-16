@@ -386,7 +386,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [p2pkh, ltm, pow20]
+            enum: [p2pkh, cos, ltm, pow20, list]
           description: Lock type
         - name: address
           in: path
@@ -536,7 +536,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [p2pkh, ltm, pow20]
+            enum: [p2pkh, cos, ltm, pow20, list]
           description: Lock type
       requestBody:
         required: true
