@@ -133,38 +133,42 @@ EVENTS_URL=mongodb://user:pass@mongo-host:27017/bsv21?authSource=admin BEEF_URL=
 
 The server will start on port 3000 by default. You can now:
 - Submit transactions to `/submit`
-- Query events at `/1sat/events/:event`
-- Check balances at `/1sat/bsv21/:event/balance`
-- Subscribe to real-time updates at `/subscribe/:topics`
+- Query event history at `/api/1sat/events/:event/history`
+- Query unspent events at `/api/1sat/events/:event/unspent`
+- Check balances at `/api/1sat/bsv21/:tokenId/:lockType/:address/balance`
+- Get transaction history at `/api/1sat/bsv21/:tokenId/:lockType/:address/history`
+- Subscribe to real-time updates at `/api/1sat/subscribe/:events`
 
 ## API Documentation
 
 ### Event Queries
 
-#### Get Events by Type
+#### Get Event History
 ```
-GET /1sat/events/:event
+GET /api/1sat/events/:event/history
 ```
 
-Query events by type with pagination support.
+Query complete transaction history (spent and unspent) for an event type.
 
 **Parameters:**
 - `event` - Event type (e.g., `id:tokenId`, `p2pkh:address:tokenId`, `sym:SYMBOL`)
 - `from` - Starting score as float64 (optional)
 - `limit` - Number of results (max 1000, default 100)
 
+**Returns:** Array of `OutputData` objects with complete transaction information including spend status.
+
 **Example:**
 ```bash
-# Get all events for a token
-curl http://localhost:3000/1sat/events/id:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1
+# Get complete history for a token
+curl http://localhost:3000/api/1sat/events/id:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/history
 
-# Get events for a specific address and token
-curl http://localhost:3000/1sat/events/p2pkh:1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1
+# Get history for a specific address and token
+curl http://localhost:3000/api/1sat/events/p2pkh:1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/history
 ```
 
 #### Get Unspent Events
 ```
-GET /1sat/events/:event/unspent
+GET /api/1sat/events/:event/unspent
 ```
 
 Query only unspent outputs for an event type.
@@ -174,56 +178,146 @@ Query only unspent outputs for an event type.
 - `from` - Starting score as float64 (optional)
 - `limit` - Number of results (max 1000, default 100)
 
+**Returns:** Array of `OutputData` objects for unspent outputs only.
+
 **Example:**
 ```bash
 # Get unspent outputs for a token
-curl http://localhost:3000/1sat/events/id:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/unspent
+curl http://localhost:3000/api/1sat/events/id:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/unspent
+```
+
+#### Bulk Event Queries
+```
+POST /api/1sat/events/history
+POST /api/1sat/events/unspent
+```
+
+Query multiple event types in a single request.
+
+**Parameters:**
+- `from` - Starting score as float64 (optional)
+- `limit` - Number of results (max 1000, default 100)
+
+**Body:** JSON array of event types (max 100)
+
+**Example:**
+```bash
+# Get history for multiple events
+curl -X POST http://localhost:3000/api/1sat/events/history \
+  -H "Content-Type: application/json" \
+  -d '["id:token1", "p2pkh:address1:token1", "sym:GOLD"]'
+
+# Get unspent outputs for multiple events  
+curl -X POST http://localhost:3000/api/1sat/events/unspent \
+  -H "Content-Type: application/json" \
+  -d '["id:token1", "p2pkh:address1:token1"]'
 ```
 
 #### Get Token Information
 ```
-GET /1sat/bsv21/:tokenId
+GET /api/1sat/bsv21/:tokenId
 ```
 
-Get detailed information about a BSV21 token.
+Get detailed mint information about a BSV21 token.
+
+**Returns:** Token metadata including symbol, decimals, amount, and icon.
 
 **Example:**
 ```bash
 # Get token details
-curl http://localhost:3000/1sat/bsv21/36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1
+curl http://localhost:3000/api/1sat/bsv21/36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1
 ```
+
+### BSV21 Token Operations
 
 #### Get Balance for Address
 ```
-GET /1sat/bsv21/:tokenId/:lockType/:address/balance
+GET /api/1sat/bsv21/:tokenId/:lockType/:address/balance
 ```
 
 Calculate the balance for a specific address and lock type.
 
 **Parameters:**
 - `tokenId` - Token identifier (txid_vout format)
-- `lockType` - Type of locking script (e.g., `p2pkh`, `cos`, `ltm`)
+- `lockType` - Type of locking script (`p2pkh`, `cos`, `ltm`, `pow20`, `list`)
 - `address` - Address or identifier
+
+**Returns:** Balance object with `balance` and `utxoCount` fields.
 
 **Example:**
 ```bash
 # Get balance for P2PKH address
-curl http://localhost:3000/1sat/bsv21/36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/p2pkh/1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64/balance
+curl http://localhost:3000/api/1sat/bsv21/36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/p2pkh/1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64/balance
 ```
 
-#### Get Balance for Multiple Addresses
+#### Get Transaction History for Address
 ```
-POST /1sat/bsv21/:tokenId/:lockType/balance
+GET /api/1sat/bsv21/:tokenId/:lockType/:address/history
 ```
 
-Calculate the combined balance for multiple addresses.
+Get complete transaction history (spent and unspent) for a specific address.
 
-**Body:** JSON array of addresses
+**Parameters:**
+- `tokenId` - Token identifier
+- `lockType` - Type of locking script (`p2pkh`, `cos`, `ltm`, `pow20`, `list`)
+- `address` - Address or identifier
+- `from` - Starting score for pagination (optional)
+- `limit` - Number of results (max 1000, default 100)
+
+**Returns:** Array of `OutputData` objects with spend tracking.
+
+**Example:**
+```bash
+# Get transaction history for address
+curl http://localhost:3000/api/1sat/bsv21/36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/p2pkh/1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64/history
+```
+
+#### Get Unspent Outputs for Address
+```
+GET /api/1sat/bsv21/:tokenId/:lockType/:address/unspent
+```
+
+Get only unspent token outputs for a specific address.
+
+**Parameters:**
+- `tokenId` - Token identifier
+- `lockType` - Type of locking script (`p2pkh`, `cos`, `ltm`, `pow20`, `list`)
+- `address` - Address or identifier
+- `from` - Starting score for pagination (optional)
+- `limit` - Number of results (max 1000, default 100)
+
+**Returns:** Array of `OutputData` objects for unspent outputs only.
+
+**Example:**
+```bash
+# Get unspent outputs for address
+curl http://localhost:3000/api/1sat/bsv21/36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/p2pkh/1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64/unspent
+```
+
+#### Bulk Operations for Multiple Addresses
+```
+POST /api/1sat/bsv21/:tokenId/:lockType/balance
+POST /api/1sat/bsv21/:tokenId/:lockType/history  
+POST /api/1sat/bsv21/:tokenId/:lockType/unspent
+```
+
+Perform operations for multiple addresses in a single request.
+
+**Parameters:**
+- `from` - Starting score for pagination (optional, history/unspent only)
+- `limit` - Number of results (optional, history/unspent only)
+
+**Body:** JSON array of addresses (max 100)
 
 **Example:**
 ```bash
 # Get combined balance for multiple addresses
-curl -X POST http://localhost:3000/1sat/bsv21/36b8aeff.../p2pkh/balance \
+curl -X POST http://localhost:3000/api/1sat/bsv21/36b8aeff.../p2pkh/balance \
+  -H "Content-Type: application/json" \
+  -d '["1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"]'
+
+# Get transaction history for multiple addresses
+curl -X POST http://localhost:3000/api/1sat/bsv21/36b8aeff.../p2pkh/history \
   -H "Content-Type: application/json" \
   -d '["1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"]'
 ```
@@ -270,20 +364,20 @@ curl http://localhost:3000/1sat/bsv21/36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5
 
 #### Subscribe to Events
 ```
-GET /1sat/subscribe/:topics
+GET /api/1sat/subscribe/:events
 ```
 
 Subscribe to real-time events via Server-Sent Events (SSE).
 
 **Parameters:**
-- `topics` - Comma-separated list of event types to subscribe to
+- `events` - Comma-separated list of event types to subscribe to
 
 **Headers:**
 - `Last-Event-ID` - Resume from a specific score (optional)
 
 **Example:**
 ```javascript
-const eventSource = new EventSource('http://localhost:3000/1sat/subscribe/id:tokenId1,p2pkh:address:tokenId2');
+const eventSource = new EventSource('http://localhost:3000/api/1sat/subscribe/id:tokenId1,p2pkh:address:tokenId2');
 eventSource.onmessage = (event) => {
     console.log('New event:', event.data);
     console.log('Event score:', event.lastEventId);
@@ -304,6 +398,41 @@ Submit a tagged BEEF transaction for processing.
 - `Content-Type: application/octet-stream`
 
 **Body:** Raw BEEF bytes
+
+## Response Format
+
+### OutputData Structure
+
+Most endpoints return `OutputData` objects with the following structure:
+
+```json
+{
+  "txid": "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127",
+  "vout": 0,
+  "script": "76a914...",
+  "satoshis": 1000,
+  "score": 902578.000001234,
+  "spend": null,
+  "data": {
+    "bsv21": {
+      "id": "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0",
+      "op": "deploy+mint", 
+      "amt": "1000000",
+      "sym": "GOLD",
+      "dec": 8
+    }
+  }
+}
+```
+
+**Fields:**
+- `txid` - Transaction ID containing this output
+- `vout` - Output index within the transaction
+- `script` - Locking script (hex encoded)
+- `satoshis` - Bitcoin satoshi value
+- `score` - Sort score for pagination (blockHeight + blockIndex/1e9)
+- `spend` - Spending transaction ID (null if unspent)
+- `data` - Protocol-specific data (BSV21 token information)
 
 ## Event Types
 
