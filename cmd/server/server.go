@@ -110,6 +110,7 @@ func broadcastMessages(ctx context.Context) {
 			return
 		case msg := <-msgChan:
 			// Get the list of clients for the topic
+			log.Println("msg:")
 			topicClientsMutex.Lock()
 			clients := topicClients[msg.Channel]
 			// Create a new slice to hold clients that are still connected
@@ -121,12 +122,17 @@ func broadcastMessages(ctx context.Context) {
 				if len(parts) == 2 {
 					score := parts[0]
 					outpoint := parts[1]
-					_, err := fmt.Fprintf(client, "data: %s\n", outpoint)
-					if err == nil {
-						_, _ = fmt.Fprintf(client, "id: %s\n\n", score)
-						if err := client.Flush(); err == nil {
-							activeClients = append(activeClients, client)
-						}
+					
+					// Write both lines
+					_, err1 := fmt.Fprintf(client, "data: %s\n", outpoint)
+					_, err2 := fmt.Fprintf(client, "id: %s\n\n", score)
+					
+					// Always attempt to flush, regardless of write errors
+					flushErr := client.Flush()
+					
+					// Only keep client if all operations succeeded
+					if err1 == nil && err2 == nil && flushErr == nil {
+						activeClients = append(activeClients, client)
 					}
 				}
 			}
@@ -338,7 +344,7 @@ func main() {
 		question := parseEventQuery(c)
 		question.Events = events
 		question.UnspentOnly = false // History includes all outputs
-		
+
 		outputs, err := store.FindOutputData(c.Context(), question)
 		if err != nil {
 			log.Printf("History lookup error: %v", err)
@@ -399,7 +405,7 @@ func main() {
 		question := parseEventQuery(c)
 		question.Events = events
 		question.UnspentOnly = true
-		
+
 		outputs, err := store.FindOutputData(c.Context(), question)
 		if err != nil {
 			log.Printf("Unspent lookup error: %v", err)
@@ -540,7 +546,7 @@ func main() {
 		question := parseEventQuery(c)
 		question.Events = []string{event}
 		question.UnspentOnly = false // History includes all outputs
-		
+
 		outputs, err := store.FindOutputData(c.Context(), question)
 		if err != nil {
 			log.Printf("History lookup error: %v", err)
@@ -568,7 +574,7 @@ func main() {
 			From:        0,
 			Limit:       0, // No limit
 		}
-		
+
 		outputs, err := store.FindOutputData(c.Context(), question)
 		if err != nil {
 			log.Printf("Unspent lookup error: %v", err)
@@ -669,7 +675,7 @@ func main() {
 		question := parseEventQuery(c)
 		question.Events = events
 		question.UnspentOnly = false // History includes all outputs
-		
+
 		outputs, err := store.FindOutputData(c.Context(), question)
 		if err != nil {
 			log.Printf("History lookup error: %v", err)
@@ -723,7 +729,7 @@ func main() {
 			From:        0,
 			Limit:       0, // No limit
 		}
-		
+
 		outputs, err := store.FindOutputData(c.Context(), question)
 		if err != nil {
 			log.Printf("Unspent lookup error: %v", err)
@@ -815,22 +821,20 @@ func main() {
 		// Create a writer for this client
 		writer := bufio.NewWriter(c.Response().BodyWriter())
 
-		// If resuming, first send any missed events
+		// If resuming, first send any missed events using buffered events
 		if fromScore > 0 {
-			// For each event, query events since the last score
-			for _, event := range events {
-				question := &storage.EventQuestion{
-					Event: event,
-					From:  fromScore,
-					Limit: 100,
-				}
-
-				// Use storage directly to get outpoints with their actual scores
-				if results, err := store.LookupOutpoints(c.Context(), question, false); err == nil {
-					// Send each missed event with its actual score
-					for _, result := range results {
-						fmt.Fprintf(writer, "data: %s\n", result.Outpoint.String())
-						fmt.Fprintf(writer, "id: %f\n\n", result.Score)
+			publisher := store.GetPublisher()
+			if publisher != nil {
+				// For each event, get buffered events since the last score
+				for _, event := range events {
+					if recentEvents, err := publisher.GetRecentEvents(c.Context(), event, fromScore); err == nil {
+						// Send each missed event with its actual score
+						for _, eventData := range recentEvents {
+							fmt.Fprintf(writer, "data: %s\n", eventData.Outpoint)
+							fmt.Fprintf(writer, "id: %.0f\n\n", eventData.Score)
+						}
+						// Flush after each event's batch to ensure immediate delivery
+						writer.Flush()
 					}
 				}
 			}
