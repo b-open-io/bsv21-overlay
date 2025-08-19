@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -10,12 +11,12 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/config"
+	"github.com/b-open-io/overlay/pubsub"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
@@ -32,9 +33,8 @@ var chaintracker *headers_client.Client
 var PORT int
 var SYNC bool
 var redisClient *redis.Client                       // Redis client for pub/sub and queue operations
-var topicClients = make(map[string][]*bufio.Writer) // Map of topic to connected clients
-var topicClientsMutex = &sync.Mutex{}               // Mutex to protect topicClients
-var peers = []string{}
+var redisPubSub *pubsub.RedisPubSub                 // Redis pub/sub handler
+var sseSync *pubsub.SSESync                         // Centralized SSE sync manager
 var e *engine.Engine
 
 // Configuration from flags/env
@@ -85,61 +85,98 @@ func init() {
 			log.Fatalf("Failed to connect to Redis: %v", err)
 		}
 	}
-	PEERS := os.Getenv("PEERS")
-	if PEERS != "" {
-		peers = strings.Split(PEERS, ",")
+	// Initialize Redis pub/sub if configured
+	if redisURL != "" {
+		var err error
+		redisPubSub, err = pubsub.NewRedisPubSub(redisURL)
+		if err != nil {
+			log.Fatalf("Failed to initialize Redis pub/sub: %v", err)
+		}
 	}
 }
 
-// broadcastMessages handles real-time event broadcasting
+// broadcastMessages handles real-time event broadcasting using RedisPubSub
 func broadcastMessages(ctx context.Context) {
-	if redisClient == nil {
-		log.Println("No Redis configured, real-time broadcasting disabled")
+	if redisPubSub == nil {
+		log.Println("No Redis pub/sub configured, real-time broadcasting disabled")
 		return
 	}
 
-	// Subscribe to all channels
-	pubsub := redisClient.PSubscribe(ctx, "*")
-	defer pubsub.Close()
+	// Start broadcasting Redis messages to SSE clients
+	if err := redisPubSub.StartBroadcasting(ctx); err != nil {
+		log.Printf("Redis broadcasting error: %v", err)
+	}
+}
 
-	msgChan := pubsub.Channel()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-msgChan:
-			// Get the list of clients for the topic
-			log.Println("msg:")
-			topicClientsMutex.Lock()
-			clients := topicClients[msg.Channel]
-			// Create a new slice to hold clients that are still connected
-			var activeClients []*bufio.Writer
-			for _, client := range clients {
-				// Try to write to the client
-				// Message format is "score:outpoint"
-				parts := strings.SplitN(msg.Payload, ":", 2)
-				if len(parts) == 2 {
-					score := parts[0]
-					outpoint := parts[1]
-					
-					// Write both lines
-					_, err1 := fmt.Fprintf(client, "data: %s\n", outpoint)
-					_, err2 := fmt.Fprintf(client, "id: %s\n\n", score)
-					
-					// Always attempt to flush, regardless of write errors
-					flushErr := client.Flush()
-					
-					// Only keep client if all operations succeeded
-					if err1 == nil && err2 == nil && flushErr == nil {
-						activeClients = append(activeClients, client)
+// startSSESync starts centralized SSE sync with configured peers
+func startSSESync(ctx context.Context, tokens []string) {
+	// Build peer-to-topics mapping from .env TOPIC_PEERS configuration
+	peerTopics := make(map[string][]string)
+	
+	// Parse TOPIC_PEERS JSON for topic-specific peer configuration
+	if topicPeersJSON := os.Getenv("TOPIC_PEERS"); topicPeersJSON != "" {
+		var topicPeerConfig map[string]struct {
+			Peers []string `json:"peers"`
+			SSE   bool     `json:"sse"`
+			GASP  bool     `json:"gasp"`
+		}
+		
+		if err := json.Unmarshal([]byte(topicPeersJSON), &topicPeerConfig); err != nil {
+			log.Printf("Failed to parse TOPIC_PEERS JSON: %v", err)
+		} else {
+			// Build reverse mapping: peer -> topics (only for topics with SSE enabled)
+			for topic, config := range topicPeerConfig {
+				if config.SSE { // Only add topics that have SSE enabled
+					for _, peer := range config.Peers {
+						peer = strings.TrimSpace(peer)
+						if peer != "" {
+							peerTopics[peer] = append(peerTopics[peer], topic)
+						}
 					}
 				}
 			}
-			// Update the client list with only active clients
-			topicClients[msg.Channel] = activeClients
-			topicClientsMutex.Unlock()
+			log.Printf("Loaded SSE peer configuration for %d topics", len(topicPeerConfig))
 		}
+	}
+	
+	// Fallback to global PEERS for all topics if no TOPIC_PEERS configured
+	if len(peerTopics) == 0 {
+		if peersEnv := os.Getenv("PEERS"); peersEnv != "" {
+			peers := strings.Split(peersEnv, ",")
+			for _, peer := range peers {
+				peer = strings.TrimSpace(peer)
+				if peer != "" {
+					// Add all tokens as topics for this peer
+					for _, tokenId := range tokens {
+						topicName := "tm_" + tokenId
+						peerTopics[peer] = append(peerTopics[peer], topicName)
+					}
+				}
+			}
+			log.Printf("Using global PEERS fallback for SSE sync")
+		}
+	}
+	
+	if len(peerTopics) == 0 {
+		log.Println("No peers configured for SSE sync")
+		return
+	}
+	
+	// Initialize SSE sync with engine and storage
+	sseSync = pubsub.NewSSESync(e, e.Storage)
+	
+	// Start SSE sync
+	if err := sseSync.Start(ctx, peerTopics); err != nil {
+		log.Printf("Failed to start SSE sync: %v", err)
+	} else {
+		log.Printf("Started SSE sync with peers: %v", peerTopics)
+	}
+}
+
+// stopSSESync stops the centralized SSE sync
+func stopSSESync() {
+	if sseSync != nil {
+		sseSync.Stop()
 	}
 }
 
@@ -155,6 +192,14 @@ func main() {
 	cleanup := func() {
 		log.Println("Shutting down server...")
 		cancel()
+
+		// Stop SSE sync
+		stopSSESync()
+
+		// Close Redis pub/sub
+		if redisPubSub != nil {
+			redisPubSub.Close()
+		}
 
 		// Close Redis connection
 		if redisClient != nil {
@@ -235,9 +280,52 @@ func main() {
 			store,
 			[]string{tokenId},
 		)
-		e.SyncConfiguration[topicName] = engine.SyncConfiguration{
-			Type:  engine.SyncConfigurationPeers,
-			Peers: peers,
+		
+		// Configure GASP sync peers for this topic
+		var gaspPeers []string
+		
+		// First try TOPIC_PEERS configuration
+		if topicPeersJSON := os.Getenv("TOPIC_PEERS"); topicPeersJSON != "" {
+			var topicPeerConfig map[string]struct {
+				Peers []string `json:"peers"`
+				SSE   bool     `json:"sse"`
+				GASP  bool     `json:"gasp"`
+			}
+			
+			if err := json.Unmarshal([]byte(topicPeersJSON), &topicPeerConfig); err == nil {
+				if config, exists := topicPeerConfig[topicName]; exists && config.GASP {
+					for _, peer := range config.Peers {
+						peer = strings.TrimSpace(peer)
+						if peer != "" {
+							gaspPeers = append(gaspPeers, peer)
+						}
+					}
+					log.Printf("Using TOPIC_PEERS GASP configuration for topic %s", topicName)
+				}
+			}
+		}
+		
+		// Fallback to global PEERS if no topic-specific GASP config
+		if len(gaspPeers) == 0 {
+			if peersEnv := os.Getenv("PEERS"); peersEnv != "" {
+				peers := strings.Split(peersEnv, ",")
+				for _, peer := range peers {
+					peer = strings.TrimSpace(peer)
+					if peer != "" {
+						gaspPeers = append(gaspPeers, peer)
+					}
+				}
+				log.Printf("Using global PEERS fallback for GASP sync on topic %s", topicName)
+			}
+		}
+		
+		// Configure GASP sync if we have peers
+		if len(gaspPeers) > 0 {
+			e.SyncConfiguration[topicName] = engine.SyncConfiguration{
+				Type:  engine.SyncConfigurationPeers,
+				Peers: gaspPeers,
+			}
+			log.Printf("Configured GASP sync for topic %s with peers: %v", topicName, gaspPeers)
 		}
 	}
 
@@ -248,6 +336,12 @@ func main() {
 			if err := e.StartGASPSync(ctx); err != nil {
 				log.Printf("Error starting GASP sync: %v", err)
 			}
+		}()
+		
+		// Start SSE clients for topics that have SSE enabled
+		go func() {
+			log.Println("Starting SSE sync...")
+			startSSESync(ctx, tokens)
 		}()
 	}
 
@@ -806,6 +900,8 @@ func main() {
 		c.Set("Content-Type", "text/event-stream")
 		c.Set("Cache-Control", "no-cache")
 		c.Set("Connection", "keep-alive")
+		c.Set("Transfer-Encoding", "chunked")
+		c.Set("X-Accel-Buffering", "no")
 		c.Set("Access-Control-Allow-Origin", "*")
 
 		// Check for Last-Event-ID header for resumption
@@ -818,55 +914,57 @@ func main() {
 			}
 		}
 
-		// Create a writer for this client
-		writer := bufio.NewWriter(c.Response().BodyWriter())
+		// Create a channel for this client to signal when to close
+		clientDone := make(chan struct{})
 
-		// If resuming, first send any missed events using buffered events
-		if fromScore > 0 {
-			publisher := store.GetPublisher()
-			if publisher != nil {
-				// For each event, get buffered events since the last score
-				for _, event := range events {
-					if recentEvents, err := publisher.GetRecentEvents(c.Context(), event, fromScore); err == nil {
-						// Send each missed event with its actual score
-						for _, eventData := range recentEvents {
-							fmt.Fprintf(writer, "data: %s\n", eventData.Outpoint)
-							fmt.Fprintf(writer, "id: %.0f\n\n", eventData.Score)
+		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+			// If resuming, first send any missed events using buffered events
+			if fromScore > 0 {
+				pubsub := store.GetPubSub()
+				if pubsub != nil {
+					// For each event, get buffered events since the last score
+					for _, event := range events {
+						if recentEvents, err := pubsub.GetRecentEvents(ctx, event, fromScore); err == nil {
+							// Send each missed event with its actual score
+							for _, eventData := range recentEvents {
+								fmt.Fprintf(w, "data: %s\n", eventData.Outpoint)
+								fmt.Fprintf(w, "id: %.0f\n\n", eventData.Score)
+								if err := w.Flush(); err != nil {
+									return // Connection closed
+								}
+							}
 						}
-						// Flush after each event's batch to ensure immediate delivery
-						writer.Flush()
 					}
 				}
 			}
-			writer.Flush()
-		}
 
-		// Register the client for each event
-		topicClientsMutex.Lock()
-		for _, event := range events {
-			topicClients[event] = append(topicClients[event], writer)
-		}
-		topicClientsMutex.Unlock()
-
-		// Send initial message
-		fmt.Fprintf(writer, "data: Connected to events: %s\n\n", strings.Join(events, ", "))
-		writer.Flush()
-
-		// Keep the connection open
-		<-c.Context().Done()
-
-		// Remove the client when disconnected
-		topicClientsMutex.Lock()
-		for _, event := range events {
-			clients := topicClients[event]
-			for i, client := range clients {
-				if client == writer {
-					topicClients[event] = append(clients[:i], clients[i+1:]...)
-					break
-				}
+			// Send initial connection message
+			fmt.Fprintf(w, "data: Connected to events: %s\n\n", strings.Join(events, ", "))
+			if err := w.Flush(); err != nil {
+				return // Connection closed
 			}
-		}
-		topicClientsMutex.Unlock()
+
+			// Register this client for each event with RedisPubSub
+			if redisPubSub != nil {
+				for _, event := range events {
+					redisPubSub.AddSSEClient(event, w)
+				}
+
+				// Cleanup function
+				defer func() {
+					// Remove the client when disconnected
+					if redisPubSub != nil {
+						for _, event := range events {
+							redisPubSub.RemoveSSEClient(event, w)
+						}
+					}
+					close(clientDone)
+				}()
+			}
+
+			// Keep connection alive - wait for context cancellation
+			<-ctx.Done()
+		})
 
 		return nil
 	})
