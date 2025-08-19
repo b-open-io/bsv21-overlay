@@ -20,6 +20,7 @@ import (
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
+	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
@@ -35,6 +36,7 @@ var SYNC bool
 var redisClient *redis.Client                       // Redis client for pub/sub and queue operations
 var redisPubSub *pubsub.RedisPubSub                 // Redis pub/sub handler
 var sseSync *pubsub.SSESync                         // Centralized SSE sync manager
+var peerBroadcaster *pubsub.PeerBroadcaster         // Peer transaction broadcaster
 var e *engine.Engine
 
 // Configuration from flags/env
@@ -93,6 +95,7 @@ func init() {
 			log.Fatalf("Failed to initialize Redis pub/sub: %v", err)
 		}
 	}
+	
 }
 
 // broadcastMessages handles real-time event broadcasting using RedisPubSub
@@ -116,9 +119,10 @@ func startSSESync(ctx context.Context, tokens []string) {
 	// Parse TOPIC_PEERS JSON for topic-specific peer configuration
 	if topicPeersJSON := os.Getenv("TOPIC_PEERS"); topicPeersJSON != "" {
 		var topicPeerConfig map[string]struct {
-			Peers []string `json:"peers"`
-			SSE   bool     `json:"sse"`
-			GASP  bool     `json:"gasp"`
+			Peers     []string `json:"peers"`
+			SSE       bool     `json:"sse"`
+			GASP      bool     `json:"gasp"`
+			Broadcast bool     `json:"broadcast"`
 		}
 		
 		if err := json.Unmarshal([]byte(topicPeersJSON), &topicPeerConfig); err != nil {
@@ -177,6 +181,44 @@ func startSSESync(ctx context.Context, tokens []string) {
 func stopSSESync() {
 	if sseSync != nil {
 		sseSync.Stop()
+	}
+}
+
+// setupPeerBroadcasting configures peer broadcasting based on TOPIC_PEERS
+func setupPeerBroadcasting(ctx context.Context, tokens []string) {
+	// Build peer-to-topics mapping for broadcasting
+	peerTopics := make(map[string][]string)
+	
+	// Parse TOPIC_PEERS JSON for broadcast-enabled peers
+	if topicPeersJSON := os.Getenv("TOPIC_PEERS"); topicPeersJSON != "" {
+		var topicPeerConfig map[string]struct {
+			Peers     []string `json:"peers"`
+			SSE       bool     `json:"sse"`
+			GASP      bool     `json:"gasp"`
+			Broadcast bool     `json:"broadcast"`
+		}
+		
+		if err := json.Unmarshal([]byte(topicPeersJSON), &topicPeerConfig); err != nil {
+			log.Printf("Failed to parse TOPIC_PEERS JSON for broadcasting: %v", err)
+		} else {
+			// Build reverse mapping: peer -> topics (only for topics with broadcast enabled)
+			for topic, config := range topicPeerConfig {
+				if config.Broadcast { // Only add topics that have broadcast enabled
+					for _, peer := range config.Peers {
+						peer = strings.TrimSpace(peer)
+						if peer != "" {
+							peerTopics[peer] = append(peerTopics[peer], topic)
+						}
+					}
+				}
+			}
+			log.Printf("Configured peer broadcasting for %d peers", len(peerTopics))
+		}
+	}
+	
+	// Create peer broadcaster with the configured peer-topic mapping
+	if len(peerTopics) > 0 {
+		peerBroadcaster = pubsub.NewPeerBroadcaster(peerTopics)
 	}
 }
 
@@ -287,9 +329,10 @@ func main() {
 		// First try TOPIC_PEERS configuration
 		if topicPeersJSON := os.Getenv("TOPIC_PEERS"); topicPeersJSON != "" {
 			var topicPeerConfig map[string]struct {
-				Peers []string `json:"peers"`
-				SSE   bool     `json:"sse"`
-				GASP  bool     `json:"gasp"`
+				Peers     []string `json:"peers"`
+				SSE       bool     `json:"sse"`
+				GASP      bool     `json:"gasp"`
+				Broadcast bool     `json:"broadcast"`
 			}
 			
 			if err := json.Unmarshal([]byte(topicPeersJSON), &topicPeerConfig); err == nil {
@@ -297,7 +340,8 @@ func main() {
 					for _, peer := range config.Peers {
 						peer = strings.TrimSpace(peer)
 						if peer != "" {
-							gaspPeers = append(gaspPeers, peer)
+							// Add /api/v1 path for GASP endpoints
+							gaspPeers = append(gaspPeers, peer+"/api/v1")
 						}
 					}
 					log.Printf("Using TOPIC_PEERS GASP configuration for topic %s", topicName)
@@ -312,7 +356,8 @@ func main() {
 				for _, peer := range peers {
 					peer = strings.TrimSpace(peer)
 					if peer != "" {
-						gaspPeers = append(gaspPeers, peer)
+						// Add /api/v1 path for GASP endpoints
+						gaspPeers = append(gaspPeers, peer+"/api/v1")
 					}
 				}
 				log.Printf("Using global PEERS fallback for GASP sync on topic %s", topicName)
@@ -328,6 +373,9 @@ func main() {
 			log.Printf("Configured GASP sync for topic %s with peers: %v", topicName, gaspPeers)
 		}
 	}
+
+	// Setup peer broadcasting for transaction submission
+	setupPeerBroadcasting(ctx, tokens)
 
 	// Start GASP sync if requested
 	if SYNC {
@@ -969,7 +1017,72 @@ func main() {
 		return nil
 	})
 
-	// Register overlay service routes using server pattern
+	// Add custom submit route with peer broadcasting
+	app.Post("/api/v1/submit", func(c *fiber.Ctx) error {
+		// Parse x-topics header
+		topicsHeader := c.Get("x-topics")
+		if topicsHeader == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "x-topics header is required",
+			})
+		}
+		
+		topics := strings.Split(topicsHeader, ",")
+		for i, topic := range topics {
+			topics[i] = strings.TrimSpace(topic)
+		}
+		
+		// Read BEEF body
+		beef := c.Body()
+		if len(beef) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "BEEF transaction data is required",
+			})
+		}
+		
+		// Create TaggedBEEF
+		taggedBEEF := overlay.TaggedBEEF{
+			Beef:   beef,
+			Topics: topics,
+		}
+		
+		// Submit to local engine
+		steak, err := e.Submit(c.Context(), taggedBEEF, engine.SubmitModeCurrent, nil)
+		if err != nil {
+			log.Printf("Failed to submit transaction locally: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to process transaction",
+			})
+		}
+		
+		// Build TaggedBEEF with only successfully processed topics for peer broadcasting
+		if peerBroadcaster != nil && len(steak) > 0 {
+			successfulTopics := make([]string, 0, len(steak))
+			for topic := range steak {
+				successfulTopics = append(successfulTopics, topic)
+			}
+			
+			// Only broadcast topics that were successfully processed
+			broadcastBEEF := overlay.TaggedBEEF{
+				Beef:   beef,
+				Topics: successfulTopics,
+			}
+			
+			go func() {
+				if err := peerBroadcaster.BroadcastTransaction(context.Background(), broadcastBEEF); err != nil {
+					log.Printf("Failed to broadcast transaction to peers: %v", err)
+				}
+			}()
+		}
+		
+		// Return success response (matching overlay service format)
+		return c.JSON(fiber.Map{
+			"description": "Overlay engine successfully processed the submitted transaction",
+			"steak":       steak,
+		})
+	})
+
+	// Register overlay service routes using server pattern (excluding submit route)
 	server.RegisterRoutes(app, &server.RegisterRoutesConfig{
 		ARCAPIKey:        os.Getenv("ARC_API_KEY"),
 		ARCCallbackToken: os.Getenv("ARC_CALLBACK_TOKEN"),
