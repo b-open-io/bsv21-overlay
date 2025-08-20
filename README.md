@@ -133,8 +133,8 @@ EVENTS_URL=mongodb://user:pass@mongo-host:27017/bsv21?authSource=admin BEEF_URL=
 
 The server will start on port 3000 by default. You can now:
 - Submit transactions to `/submit`
-- Query event history at `/api/1sat/events/:event/history`
-- Query unspent events at `/api/1sat/events/:event/unspent`
+- Query event history at `/api/1sat/events/:topic/:event/history`
+- Query unspent events at `/api/1sat/events/:topic/:event/unspent`
 - Check balances at `/api/1sat/bsv21/:tokenId/:lockType/:address/balance`
 - Get transaction history at `/api/1sat/bsv21/:tokenId/:lockType/:address/history`
 - Subscribe to real-time updates at `/api/1sat/subscribe/:events`
@@ -145,7 +145,7 @@ The server will start on port 3000 by default. You can now:
 
 #### Get Event History
 ```
-GET /api/1sat/events/:event/history
+GET /api/1sat/events/:topic/:event/history
 ```
 
 Query complete transaction history (spent and unspent) for an event type.
@@ -160,15 +160,15 @@ Query complete transaction history (spent and unspent) for an event type.
 **Example:**
 ```bash
 # Get complete history for a token
-curl http://localhost:3000/api/1sat/events/id:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/history
+curl http://localhost:3000/api/1sat/events/tm_36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff/id:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/history
 
 # Get history for a specific address and token
-curl http://localhost:3000/api/1sat/events/p2pkh:1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/history
+curl http://localhost:3000/api/1sat/events/tm_36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff/p2pkh:1F5VhMHukdnUES9kfXqzPzMeF1GPHKiF64:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/history
 ```
 
 #### Get Unspent Events
 ```
-GET /api/1sat/events/:event/unspent
+GET /api/1sat/events/:topic/:event/unspent
 ```
 
 Query only unspent outputs for an event type.
@@ -183,13 +183,13 @@ Query only unspent outputs for an event type.
 **Example:**
 ```bash
 # Get unspent outputs for a token
-curl http://localhost:3000/api/1sat/events/id:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/unspent
+curl http://localhost:3000/api/1sat/events/tm_36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff/id:36b8aeff1d04e07d1d6ea6d58e0e7c0860cd0c86b5a37a44166f84eb5643f5ff_1/unspent
 ```
 
 #### Bulk Event Queries
 ```
-POST /api/1sat/events/history
-POST /api/1sat/events/unspent
+POST /api/1sat/events/:topic/history
+POST /api/1sat/events/:topic/unspent
 ```
 
 Query multiple event types in a single request.
@@ -203,12 +203,12 @@ Query multiple event types in a single request.
 **Example:**
 ```bash
 # Get history for multiple events
-curl -X POST http://localhost:3000/api/1sat/events/history \
+curl -X POST http://localhost:3000/api/1sat/events/tm_tokenId/history \
   -H "Content-Type: application/json" \
   -d '["id:token1", "p2pkh:address1:token1", "sym:GOLD"]'
 
 # Get unspent outputs for multiple events  
-curl -X POST http://localhost:3000/api/1sat/events/unspent \
+curl -X POST http://localhost:3000/api/1sat/events/tm_tokenId/unspent \
   -H "Content-Type: application/json" \
   -d '["id:token1", "p2pkh:address1:token1"]'
 ```

@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the BSV-21 overlay service, part of a larger monorepo of BSV blockchain overlay services. It handles BSV-21 token transactions, providing real-time event streaming, lookups, and SPV validation.
 
+The service is built on a **unified storage interface** that abstracts away backend-specific implementations, allowing seamless switching between Redis, MongoDB, SQLite, and filesystem storage through configuration alone.
+
 ## Architecture
 
 The service consists of 4 main executables that work together:
@@ -15,11 +17,30 @@ The service consists of 4 main executables that work together:
 3. **process.run** - Validates transactions and updates token state
 4. **server.run** - HTTP API server providing lookup and streaming endpoints
 
+### Unified Storage Architecture
+
+The core innovation is the **EventDataStorage** interface that provides Redis-style operations (SAdd, HSet, ZAdd, etc.) across all storage backends:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Unified Storage Interface                    │
+├─────────────────────────────────────────────────────────────────┤
+│  SAdd, HSet, ZAdd, Get, Set, Exists, Subscribe, Publish, etc.  │
+└─────────────────┬───────────┬───────────┬───────────────────────┘
+                  │           │           │
+            ┌─────▼─────┐ ┌───▼───┐ ┌─────▼─────┐
+            │   Redis   │ │ SQLite│ │  MongoDB  │
+            │           │ │       │ │           │
+            │ Native    │ │ Emul- │ │ Field     │
+            │ Commands  │ │ ated  │ │ Mapping   │
+            └───────────┘ └───────┘ └───────────┘
+```
+
 ### Data Flow
 ```
-JungleBus → sub → Redis Queue → queue → Token Queues → process → SQLite/Redis
+JungleBus → sub → Redis Queue → queue → Token Queues → process → Unified Storage
                                                                       ↓
-Clients ← server ← Event Storage
+Clients ← server ← Event Storage (Redis/MongoDB/SQLite via unified interface)
 ```
 
 ## Build Commands
@@ -60,16 +81,53 @@ Services should be started in this order:
 
 ## Configuration
 
-Create a `.env` file with:
-```
-REDIS=redis://localhost:6379
-BLOCK_HEADERS_URL=https://api.whatsonchain.com/v1/bsv/main/block
-BLOCK_HEADERS_API_KEY=your_api_key
+The service uses a **factory pattern** with connection strings for backend selection. Configuration is handled through environment variables that auto-detect storage types from URL schemes.
+
+### Environment Variables
+
+```bash
+# Event Storage - Required (auto-detects backend from URL scheme)
+EVENTS_URL=mongodb://user:pass@localhost:27017/bsv21?authSource=admin  # MongoDB
+# OR
+EVENTS_URL=redis://localhost:6379                                      # Redis  
+# OR  
+EVENTS_URL=./overlay.db                                                # SQLite (default)
+
+# BEEF Storage - Optional, supports hierarchical stacking
+BEEF_URL=redis://localhost:6379                                       # Single backend
+# OR
+BEEF_URL='["lru://1gb", "redis://localhost:6379", "junglebus://"]'     # Hierarchical stack
+
+# Redis for Pub/Sub - Required for queue operations and SSE streaming
+REDIS_URL=redis://localhost:6379
+
+# Service Configuration
+PORT=3000
 HOSTING_URL=http://localhost:3000
+HEADERS_URL=https://api.whatsonchain.com/v1/bsv/main/block
+HEADERS_KEY=your_api_key
+
+# Optional: Peer synchronization
 PEERS=http://peer1:3000,http://peer2:3000
 JUNGLEBUS=https://texas1.junglebus.gorillapool.io
-PORT=3000
 ```
+
+### No-Dependency Default Configuration
+
+The service works out-of-the-box with minimal setup:
+
+```bash
+# Only Redis is required - everything else defaults to local files
+export REDIS_URL=redis://localhost:6379
+# EVENTS_URL defaults to ./overlay.db (SQLite)
+# BEEF_URL defaults to ./beef_storage/ (filesystem)
+```
+
+This provides a complete working system using:
+- **SQLite** for event storage
+- **Go channels** for pub/sub (internal-only, no external SSE)
+- **Filesystem** for BEEF storage
+- **Redis** for queue operations only
 
 ## API Endpoints
 

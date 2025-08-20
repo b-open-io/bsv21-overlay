@@ -28,13 +28,19 @@ tags:
 
 paths:
   # BSV21-specific routes
-  /api/1sat/events/{event}/history:
+  /api/1sat/events/{topic}/{event}/history:
     get:
       tags:
         - 1sat-events
       summary: Query event history by type
       description: Returns complete history (spent and unspent) for the specified event type
       parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Topic scope for the query (e.g., "tm_tokenId")
         - name: event
           in: path
           required: true
@@ -67,13 +73,19 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/1sat/events/history:
+  /api/1sat/events/{topic}/history:
     post:
       tags:
         - 1sat-events
       summary: Query event history for multiple event types
       description: Returns complete history (spent and unspent) for multiple event types
       parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Topic scope for the query (e.g., "tm_tokenId")
         - name: from
           in: query
           schema:
@@ -110,13 +122,19 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/1sat/events/{event}/unspent:
+  /api/1sat/events/{topic}/{event}/unspent:
     get:
       tags:
         - 1sat-events
       summary: Query unspent events by type
       description: Returns only unspent outputs matching the specified event type
       parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Topic scope for the query (e.g., "tm_tokenId")
         - name: event
           in: path
           required: true
@@ -149,13 +167,19 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/1sat/events/unspent:
+  /api/1sat/events/{topic}/unspent:
     post:
       tags:
         - 1sat-events
       summary: Query unspent events for multiple event types
       description: Returns only unspent outputs for multiple event types
       parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Topic scope for the query (e.g., "tm_tokenId")
         - name: from
           in: query
           schema:

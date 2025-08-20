@@ -136,7 +136,7 @@ func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *
 		}
 
 		// Save all events with the data using the storage layer
-		if err := l.storage.SaveEvents(ctx, payload.Outpoint, events, blockHeight, blockIdx, dataToStore); err != nil {
+		if err := l.storage.SaveEvents(ctx, payload.Outpoint, events, payload.Topic, blockHeight, blockIdx, dataToStore); err != nil {
 			return err
 		}
 	}

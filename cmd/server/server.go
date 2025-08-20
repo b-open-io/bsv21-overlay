@@ -27,14 +27,72 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
-	"github.com/redis/go-redis/v9"
 )
 
 var chaintracker *headers_client.Client
 var PORT int
 var SYNC bool
-var redisClient *redis.Client                       // Redis client for pub/sub and queue operations
-var redisPubSub *pubsub.RedisPubSub                 // Redis pub/sub handler
+
+const (
+	PeerConfigKeyPrefix = "peers:tm_"
+)
+
+type PeerSettings struct {
+	SSE       bool `json:"sse"`
+	GASP      bool `json:"gasp"`
+	Broadcast bool `json:"broadcast"`
+}
+
+// loadPeerConfigFromStorage reads peer configuration from storage for a given token
+func loadPeerConfigFromStorage(ctx context.Context, store storage.EventDataStorage, tokenId string) (map[string]PeerSettings, error) {
+	key := PeerConfigKeyPrefix + tokenId
+	peerData, err := store.HGetAll(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get peer config for token %s: %v", tokenId, err)
+	}
+	
+	peers := make(map[string]PeerSettings)
+	for peerURL, settingsJSON := range peerData {
+		var settings PeerSettings
+		if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
+			log.Printf("Warning: failed to parse settings for peer %s (token %s): %v", peerURL, tokenId, err)
+			continue
+		}
+		peers[peerURL] = settings
+	}
+	
+	return peers, nil
+}
+
+// getPeersWithSetting returns peers that have a specific setting enabled for a token
+func getPeersWithSetting(ctx context.Context, store storage.EventDataStorage, tokenId string, settingName string) ([]string, error) {
+	peerConfig, err := loadPeerConfigFromStorage(ctx, store, tokenId)
+	if err != nil {
+		return nil, err
+	}
+	
+	var enabledPeers []string
+	for peerURL, settings := range peerConfig {
+		switch settingName {
+		case "sse":
+			if settings.SSE {
+				enabledPeers = append(enabledPeers, peerURL)
+			}
+		case "gasp":
+			if settings.GASP {
+				// Add /api/v1 path for GASP endpoints
+				enabledPeers = append(enabledPeers, peerURL+"/api/v1")
+			}
+		case "broadcast":
+			if settings.Broadcast {
+				enabledPeers = append(enabledPeers, peerURL)
+			}
+		}
+	}
+	
+	return enabledPeers, nil
+}
+
 var sseSync *pubsub.SSESync                         // Centralized SSE sync manager
 var peerBroadcaster *pubsub.PeerBroadcaster         // Peer transaction broadcaster
 var e *engine.Engine
@@ -73,91 +131,39 @@ func init() {
 		beefURL = "./beef_storage"
 	}
 
-	// Set up Redis client (if URL is provided)
-	if redisURL != "" {
-		opts, err := redis.ParseURL(redisURL)
-		if err != nil {
-			log.Fatalf("Failed to parse Redis URL: %v", err)
-		}
-		redisClient = redis.NewClient(opts)
-
-		// Test connection
-		ctx := context.Background()
-		if err := redisClient.Ping(ctx).Err(); err != nil {
-			log.Fatalf("Failed to connect to Redis: %v", err)
-		}
-	}
-	// Initialize Redis pub/sub if configured
-	if redisURL != "" {
-		var err error
-		redisPubSub, err = pubsub.NewRedisPubSub(redisURL)
-		if err != nil {
-			log.Fatalf("Failed to initialize Redis pub/sub: %v", err)
-		}
-	}
+	// Redis configuration is now handled by the storage factory
 	
 }
 
-// broadcastMessages handles real-time event broadcasting using RedisPubSub
-func broadcastMessages(ctx context.Context) {
-	if redisPubSub == nil {
-		log.Println("No Redis pub/sub configured, real-time broadcasting disabled")
+// broadcastMessages handles real-time event broadcasting using PubSub
+func broadcastMessages(ctx context.Context, store storage.EventDataStorage) {
+	pubsub := store.GetPubSub()
+	if pubsub == nil {
+		log.Println("No pub/sub configured, real-time broadcasting disabled")
 		return
 	}
 
-	// Start broadcasting Redis messages to SSE clients
-	if err := redisPubSub.StartBroadcasting(ctx); err != nil {
-		log.Printf("Redis broadcasting error: %v", err)
+	// Start the pub/sub system
+	if err := pubsub.Start(ctx); err != nil {
+		log.Printf("PubSub start error: %v", err)
 	}
 }
 
 // startSSESync starts centralized SSE sync with configured peers
-func startSSESync(ctx context.Context, tokens []string) {
-	// Build peer-to-topics mapping from .env TOPIC_PEERS configuration
+func startSSESync(ctx context.Context, store storage.EventDataStorage, tokens []string) {
+	// Build peer-to-topics mapping from storage configuration
 	peerTopics := make(map[string][]string)
 	
-	// Parse TOPIC_PEERS JSON for topic-specific peer configuration
-	if topicPeersJSON := os.Getenv("TOPIC_PEERS"); topicPeersJSON != "" {
-		var topicPeerConfig map[string]struct {
-			Peers     []string `json:"peers"`
-			SSE       bool     `json:"sse"`
-			GASP      bool     `json:"gasp"`
-			Broadcast bool     `json:"broadcast"`
-		}
+	// Load SSE-enabled peers for each token from storage
+	for _, tokenId := range tokens {
+		topicName := "tm_" + tokenId
 		
-		if err := json.Unmarshal([]byte(topicPeersJSON), &topicPeerConfig); err != nil {
-			log.Printf("Failed to parse TOPIC_PEERS JSON: %v", err)
-		} else {
-			// Build reverse mapping: peer -> topics (only for topics with SSE enabled)
-			for topic, config := range topicPeerConfig {
-				if config.SSE { // Only add topics that have SSE enabled
-					for _, peer := range config.Peers {
-						peer = strings.TrimSpace(peer)
-						if peer != "" {
-							peerTopics[peer] = append(peerTopics[peer], topic)
-						}
-					}
-				}
-			}
-			log.Printf("Loaded SSE peer configuration for %d topics", len(topicPeerConfig))
-		}
-	}
-	
-	// Fallback to global PEERS for all topics if no TOPIC_PEERS configured
-	if len(peerTopics) == 0 {
-		if peersEnv := os.Getenv("PEERS"); peersEnv != "" {
-			peers := strings.Split(peersEnv, ",")
+		if peers, err := getPeersWithSetting(ctx, store, tokenId, "sse"); err == nil && len(peers) > 0 {
+			// Build reverse mapping: peer -> topics (only for peers with SSE enabled)
 			for _, peer := range peers {
-				peer = strings.TrimSpace(peer)
-				if peer != "" {
-					// Add all tokens as topics for this peer
-					for _, tokenId := range tokens {
-						topicName := "tm_" + tokenId
-						peerTopics[peer] = append(peerTopics[peer], topicName)
-					}
-				}
+				peerTopics[peer] = append(peerTopics[peer], topicName)
 			}
-			log.Printf("Using global PEERS fallback for SSE sync")
+			log.Printf("Loaded SSE configuration for topic %s with %d peers", topicName, len(peers))
 		}
 	}
 	
@@ -184,41 +190,30 @@ func stopSSESync() {
 	}
 }
 
-// setupPeerBroadcasting configures peer broadcasting based on TOPIC_PEERS
-func setupPeerBroadcasting(ctx context.Context, tokens []string) {
+// setupPeerBroadcasting configures peer broadcasting from storage
+func setupPeerBroadcasting(ctx context.Context, store storage.EventDataStorage, tokens []string) {
 	// Build peer-to-topics mapping for broadcasting
 	peerTopics := make(map[string][]string)
 	
-	// Parse TOPIC_PEERS JSON for broadcast-enabled peers
-	if topicPeersJSON := os.Getenv("TOPIC_PEERS"); topicPeersJSON != "" {
-		var topicPeerConfig map[string]struct {
-			Peers     []string `json:"peers"`
-			SSE       bool     `json:"sse"`
-			GASP      bool     `json:"gasp"`
-			Broadcast bool     `json:"broadcast"`
-		}
+	// Load broadcast-enabled peers for each token from storage
+	for _, tokenId := range tokens {
+		topicName := "tm_" + tokenId
 		
-		if err := json.Unmarshal([]byte(topicPeersJSON), &topicPeerConfig); err != nil {
-			log.Printf("Failed to parse TOPIC_PEERS JSON for broadcasting: %v", err)
-		} else {
-			// Build reverse mapping: peer -> topics (only for topics with broadcast enabled)
-			for topic, config := range topicPeerConfig {
-				if config.Broadcast { // Only add topics that have broadcast enabled
-					for _, peer := range config.Peers {
-						peer = strings.TrimSpace(peer)
-						if peer != "" {
-							peerTopics[peer] = append(peerTopics[peer], topic)
-						}
-					}
-				}
+		if peers, err := getPeersWithSetting(ctx, store, tokenId, "broadcast"); err == nil && len(peers) > 0 {
+			// Build reverse mapping: peer -> topics (only for peers with broadcast enabled)
+			for _, peer := range peers {
+				peerTopics[peer] = append(peerTopics[peer], topicName)
 			}
-			log.Printf("Configured peer broadcasting for %d peers", len(peerTopics))
+			log.Printf("Loaded broadcast configuration for topic %s with %d peers", topicName, len(peers))
 		}
 	}
 	
 	// Create peer broadcaster with the configured peer-topic mapping
 	if len(peerTopics) > 0 {
 		peerBroadcaster = pubsub.NewPeerBroadcaster(peerTopics)
+		log.Printf("Configured peer broadcaster with %d peers", len(peerTopics))
+	} else {
+		log.Println("No peers configured for broadcasting")
 	}
 }
 
@@ -238,14 +233,11 @@ func main() {
 		// Stop SSE sync
 		stopSSESync()
 
-		// Close Redis pub/sub
-		if redisPubSub != nil {
-			redisPubSub.Close()
-		}
-
-		// Close Redis connection
-		if redisClient != nil {
-			redisClient.Close()
+		// Close pub/sub (handled by storage layer)
+		if store != nil {
+			if pubsub := store.GetPubSub(); pubsub != nil {
+				pubsub.Close()
+			}
 		}
 
 		// Close storage and lookup services
@@ -283,13 +275,7 @@ func main() {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
 
-	// Get Redis client from storage if we don't already have one
-	if redisClient == nil {
-		redisClient = store.GetRedisClient()
-		if redisClient == nil {
-			log.Fatal("Redis client is required for BSV21 overlay operations")
-		}
-	}
+	// Storage layer handles all Redis/database operations
 
 	// Initialize engine
 	e = &engine.Engine{
@@ -309,7 +295,7 @@ func main() {
 
 	// Load topic managers dynamically from whitelist
 	const whitelistKey = "bsv21:whitelist"
-	tokens, err := redisClient.SMembers(ctx, whitelistKey).Result()
+	tokens, err := store.SMembers(ctx, whitelistKey)
 	if err != nil {
 		log.Fatalf("Failed to get whitelisted tokens: %v", err)
 	}
@@ -323,49 +309,12 @@ func main() {
 			[]string{tokenId},
 		)
 		
-		// Configure GASP sync peers for this topic
-		var gaspPeers []string
-		
-		// First try TOPIC_PEERS configuration
-		if topicPeersJSON := os.Getenv("TOPIC_PEERS"); topicPeersJSON != "" {
-			var topicPeerConfig map[string]struct {
-				Peers     []string `json:"peers"`
-				SSE       bool     `json:"sse"`
-				GASP      bool     `json:"gasp"`
-				Broadcast bool     `json:"broadcast"`
-			}
+		// Configure GASP sync peers for this topic from storage
+		gaspPeers, err := getPeersWithSetting(ctx, store, tokenId, "gasp")
+		if err == nil && len(gaspPeers) > 0 {
+			log.Printf("Loaded GASP configuration for topic %s with %d peers", topicName, len(gaspPeers))
 			
-			if err := json.Unmarshal([]byte(topicPeersJSON), &topicPeerConfig); err == nil {
-				if config, exists := topicPeerConfig[topicName]; exists && config.GASP {
-					for _, peer := range config.Peers {
-						peer = strings.TrimSpace(peer)
-						if peer != "" {
-							// Add /api/v1 path for GASP endpoints
-							gaspPeers = append(gaspPeers, peer+"/api/v1")
-						}
-					}
-					log.Printf("Using TOPIC_PEERS GASP configuration for topic %s", topicName)
-				}
-			}
-		}
-		
-		// Fallback to global PEERS if no topic-specific GASP config
-		if len(gaspPeers) == 0 {
-			if peersEnv := os.Getenv("PEERS"); peersEnv != "" {
-				peers := strings.Split(peersEnv, ",")
-				for _, peer := range peers {
-					peer = strings.TrimSpace(peer)
-					if peer != "" {
-						// Add /api/v1 path for GASP endpoints
-						gaspPeers = append(gaspPeers, peer+"/api/v1")
-					}
-				}
-				log.Printf("Using global PEERS fallback for GASP sync on topic %s", topicName)
-			}
-		}
-		
-		// Configure GASP sync if we have peers
-		if len(gaspPeers) > 0 {
+			// Configure GASP sync
 			e.SyncConfiguration[topicName] = engine.SyncConfiguration{
 				Type:  engine.SyncConfigurationPeers,
 				Peers: gaspPeers,
@@ -375,7 +324,7 @@ func main() {
 	}
 
 	// Setup peer broadcasting for transaction submission
-	setupPeerBroadcasting(ctx, tokens)
+	setupPeerBroadcasting(ctx, store, tokens)
 
 	// Start GASP sync if requested
 	if SYNC {
@@ -389,12 +338,12 @@ func main() {
 		// Start SSE clients for topics that have SSE enabled
 		go func() {
 			log.Println("Starting SSE sync...")
-			startSSESync(ctx, tokens)
+			startSSESync(ctx, store, tokens)
 		}()
 	}
 
 	// Start broadcasting messages in a separate goroutine
-	go broadcastMessages(ctx)
+	go broadcastMessages(ctx, store)
 
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
@@ -438,13 +387,15 @@ func main() {
 	}
 
 	// Route for event history
-	onesat.Get("/events/:event/history", func(c *fiber.Ctx) error {
+	onesat.Get("/events/:topic/:event/history", func(c *fiber.Ctx) error {
+		topic := c.Params("topic")
 		event := c.Params("event")
-		log.Printf("Received request for BSV21 event history: %s", event)
+		log.Printf("Received request for BSV21 event history: %s (topic: %s)", event, topic)
 
 		// Build question and call FindOutputData for history
 		question := parseEventQuery(c)
 		question.Event = event
+		question.Topic = topic
 		question.UnspentOnly = false // History includes all outputs
 		outputs, err := store.FindOutputData(c.Context(), question)
 		if err != nil {
@@ -458,7 +409,7 @@ func main() {
 	})
 
 	// POST route for multiple events history
-	onesat.Post("/events/history", func(c *fiber.Ctx) error {
+	onesat.Post("/events/:topic/history", func(c *fiber.Ctx) error {
 		// Parse the request body - accept array of events directly
 		var events []string
 		if err := c.BodyParser(&events); err != nil {
@@ -480,11 +431,13 @@ func main() {
 			})
 		}
 
-		log.Printf("Received multi-event history request for %d events", len(events))
+		topic := c.Params("topic")
+		log.Printf("Received multi-event history request for %d events (topic: %s)", len(events), topic)
 
 		// Parse query parameters for paging
 		question := parseEventQuery(c)
 		question.Events = events
+		question.Topic = topic
 		question.UnspentOnly = false // History includes all outputs
 
 		outputs, err := store.FindOutputData(c.Context(), question)
@@ -499,13 +452,15 @@ func main() {
 	})
 
 	// Route for unspent events only
-	onesat.Get("/events/:event/unspent", func(c *fiber.Ctx) error {
+	onesat.Get("/events/:topic/:event/unspent", func(c *fiber.Ctx) error {
+		topic := c.Params("topic")
 		event := c.Params("event")
-		log.Printf("Received request for unspent BSV21 events: %s", event)
+		log.Printf("Received request for unspent BSV21 events: %s (topic: %s)", event, topic)
 
 		// Build question and call FindOutputData for unspent
 		question := parseEventQuery(c)
 		question.Event = event
+		question.Topic = topic
 		question.UnspentOnly = true
 		outputs, err := store.FindOutputData(c.Context(), question)
 		if err != nil {
@@ -519,7 +474,7 @@ func main() {
 	})
 
 	// POST route for multiple events unspent
-	onesat.Post("/events/unspent", func(c *fiber.Ctx) error {
+	onesat.Post("/events/:topic/unspent", func(c *fiber.Ctx) error {
 		// Parse the request body - accept array of events directly
 		var events []string
 		if err := c.BodyParser(&events); err != nil {
@@ -541,11 +496,13 @@ func main() {
 			})
 		}
 
-		log.Printf("Received multi-event unspent request for %d events", len(events))
+		topic := c.Params("topic")
+		log.Printf("Received multi-event unspent request for %d events (topic: %s)", len(events), topic)
 
 		// Parse query parameters for paging
 		question := parseEventQuery(c)
 		question.Events = events
+		question.Topic = topic
 		question.UnspentOnly = true
 
 		outputs, err := store.FindOutputData(c.Context(), question)
@@ -687,6 +644,7 @@ func main() {
 		// Parse query parameters for paging
 		question := parseEventQuery(c)
 		question.Events = []string{event}
+		question.Topic = "tm_" + tokenId
 		question.UnspentOnly = false // History includes all outputs
 
 		outputs, err := store.FindOutputData(c.Context(), question)
@@ -816,6 +774,7 @@ func main() {
 		// Parse query parameters for paging
 		question := parseEventQuery(c)
 		question.Events = events
+		question.Topic = "tm_" + tokenId
 		question.UnspentOnly = false // History includes all outputs
 
 		outputs, err := store.FindOutputData(c.Context(), question)
@@ -966,20 +925,32 @@ func main() {
 		clientDone := make(chan struct{})
 
 		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-			// If resuming, first send any missed events using buffered events
+			// If resuming, first send any missed events using storage
 			if fromScore > 0 {
-				pubsub := store.GetPubSub()
-				if pubsub != nil {
-					// For each event, get buffered events since the last score
-					for _, event := range events {
-						if recentEvents, err := pubsub.GetRecentEvents(ctx, event, fromScore); err == nil {
-							// Send each missed event with its actual score
-							for _, eventData := range recentEvents {
-								fmt.Fprintf(w, "data: %s\n", eventData.Outpoint)
-								fmt.Fprintf(w, "id: %.0f\n\n", eventData.Score)
-								if err := w.Flush(); err != nil {
-									return // Connection closed
-								}
+				// For each event, get recent events since the last score
+				for _, event := range events {
+					// For BSV21, if event starts with "tm_", it's a topic, otherwise extract tokenId
+					var topic string
+					if strings.HasPrefix(event, "tm_") {
+						topic = event
+					} else {
+						// Extract tokenId from event patterns like "p2pkh:address:tokenId"
+						parts := strings.Split(event, ":")
+						if len(parts) >= 3 {
+							tokenId := parts[len(parts)-1] // Last part is tokenId
+							topic = "tm_" + tokenId
+						} else {
+							continue // Skip malformed events
+						}
+					}
+					
+					if recentEvents, err := store.LookupEventScores(ctx, topic, event, fromScore); err == nil {
+						// Send each missed event with its actual score
+						for _, eventScore := range recentEvents {
+							fmt.Fprintf(w, "data: %s\n", eventScore.Member)
+							fmt.Fprintf(w, "id: %.0f\n\n", eventScore.Score)
+							if err := w.Flush(); err != nil {
+								return // Connection closed
 							}
 						}
 					}
@@ -992,19 +963,27 @@ func main() {
 				return // Connection closed
 			}
 
-			// Register this client for each event with RedisPubSub
-			if redisPubSub != nil {
+			// Register this client for each event with PubSub
+			if ps := store.GetPubSub(); ps != nil {
+				// Create SSE manager if needed and register client
+				sseManager := pubsub.NewSSEManager(ps)
 				for _, event := range events {
-					redisPubSub.AddSSEClient(event, w)
+					sseManager.AddSSEClient(event, w)
+				}
+
+				// Start the SSE manager to listen for events
+				if err := sseManager.Start(ctx); err != nil {
+					fmt.Fprintf(w, "data: Error starting SSE manager: %v\n\n", err)
+					w.Flush()
+					return
 				}
 
 				// Cleanup function
 				defer func() {
-					// Remove the client when disconnected
-					if redisPubSub != nil {
-						for _, event := range events {
-							redisPubSub.RemoveSSEClient(event, w)
-						}
+					// Stop the SSE manager and remove the client when disconnected
+					sseManager.Stop()
+					for _, event := range events {
+						sseManager.RemoveSSEClient(event, w)
 					}
 					close(clientDone)
 				}()

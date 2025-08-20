@@ -30,16 +30,16 @@ func init() {
 
 	// Create storage using the new configuration approach
 	var err error
-	eventStorage, err = config.CreateEventStorage("", "", "")
+	eventStorage, err = config.CreateEventStorage(
+		os.Getenv("EVENTS_URL"), 
+		os.Getenv("BEEF_URL"), 
+		os.Getenv("REDIS_URL"),
+	)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
 	
-	// Get Redis client for direct operations
-	redisClient = eventStorage.GetRedisClient()
-	if redisClient == nil {
-		log.Fatal("Redis client is required for BSV21 overlay operations")
-	}
+	// Storage layer handles all database operations via unified interface
 
 	// Set up chain tracker
 	chaintracker = &headers_client.Client{
@@ -71,12 +71,7 @@ func main() {
 	for {
 		start := time.Now()
 		// Get transactions from the main queue
-		members, err := redisClient.ZRangeByScoreWithScores(ctx, "bsv21", &redis.ZRangeBy{
-			Min:    "-inf",
-			Max:    "+inf",
-			Offset: 0,
-			Count:  1000,
-		}).Result()
+		members, err := eventStorage.ZRangeByScore(ctx, "bsv21", -1e9, 1e9, 0, 1000)
 		if err != nil {
 			log.Fatalf("Failed to query Redis: %v", err)
 		} else if len(members) == 0 {
@@ -88,8 +83,8 @@ func main() {
 			for _, member := range members {
 				wg.Add(1)
 				limiter <- struct{}{}
-				go func(z redis.Z) {
-					txidStr := z.Member.(string)
+				go func(z storage.ScoredMember) {
+					txidStr := z.Member
 					score := z.Score
 					defer func() {
 						wg.Done()
@@ -123,15 +118,15 @@ func main() {
 							// Use the score from the original queue entry
 							// It already contains the block height + index information
 							for tokenId := range tokenIds {
-								if err := redisClient.ZAdd(ctx, "tok:"+tokenId, redis.Z{
+								if err := eventStorage.ZAdd(ctx, "tok:"+tokenId, storage.ScoredMember{
 									Score:  score,
 									Member: txidStr,
-								}).Err(); err != nil {
+								}); err != nil {
 									log.Fatalf("Failed to set token in queue: %v", err)
 								}
 							}
 						}
-						if err := redisClient.ZRem(ctx, "bsv21", txidStr).Err(); err != nil {
+						if err := eventStorage.ZRem(ctx, "bsv21", txidStr); err != nil {
 							log.Fatalf("Failed to remove from queue: %v", err)
 						}
 					}

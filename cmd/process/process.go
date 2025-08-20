@@ -39,16 +39,16 @@ func init() {
 
 	// Create storage using the new configuration approach
 	var err error
-	eventStorage, err = config.CreateEventStorage("", "", "")
+	eventStorage, err = config.CreateEventStorage(
+		os.Getenv("EVENTS_URL"), 
+		os.Getenv("BEEF_URL"), 
+		os.Getenv("REDIS_URL"),
+	)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
 	
-	// Get Redis client for direct operations
-	redisClient = eventStorage.GetRedisClient()
-	if redisClient == nil {
-		log.Fatal("Redis client is required for BSV21 overlay operations")
-	}
+	// Storage layer handles all database operations via unified interface
 
 	// Set up chain tracker
 	chaintracker = &headers_client.Client{
@@ -74,7 +74,7 @@ func main() {
 	const whitelistKey = "bsv21:whitelist"
 
 	// Log current whitelist
-	if tokens, err := redisClient.SMembers(ctx, whitelistKey).Result(); err == nil {
+	if tokens, err := eventStorage.SMembers(ctx, whitelistKey); err == nil {
 		log.Printf("Token whitelist: %v", tokens)
 	} else {
 		log.Printf("Failed to get token whitelist: %v", err)
@@ -127,7 +127,7 @@ func main() {
 		}
 
 		// Get whitelisted tokens
-		whitelistedTokens, err := redisClient.SMembers(ctx, whitelistKey).Result()
+		whitelistedTokens, err := eventStorage.SMembers(ctx, whitelistKey)
 		if err != nil {
 			log.Printf("Failed to get whitelisted tokens: %v", err)
 			time.Sleep(5 * time.Second)
@@ -142,12 +142,7 @@ func main() {
 			key := "tok:" + tokenId
 
 			// Check if this token has any transactions to process
-			members, err := redisClient.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
-				Min:    "-inf",
-				Max:    "+inf",
-				Offset: 0,
-				Count:  1,
-			}).Result()
+			members, err := eventStorage.ZRangeByScore(ctx, key, -1e9, 1e9, 0, 1)
 			if err != nil {
 				log.Printf("Failed to check existence of key %s: %v", key, err)
 				continue
@@ -193,17 +188,14 @@ func main() {
 					}
 
 					// start := time.Now()
-					members, err := redisClient.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
-						Min: "-inf",
-						Max: "+inf",
-					}).Result()
+					members, err := eventStorage.ZRangeByScore(ctx, key, -1e9, 1e9, 0, 0)
 					if err != nil {
 						log.Fatalf("Failed to query Redis: %v", err)
 					}
 					// log.Println("Processing tokenId", parts[1], len(members), "txids")
 					logTime := time.Now()
 					for _, member := range members {
-						txidStr := member.Member.(string)
+						txidStr := member.Member
 						select {
 						case <-ctx.Done():
 							log.Println("Context canceled, stopping processing...")
@@ -242,7 +234,7 @@ func main() {
 								} else {
 									// log.Println("Submitted generated", tx.TxID().String(), "in", time.Since(logTime))
 									// logTime = time.Now()
-									if err := redisClient.ZRem(ctx, key, txidStr).Err(); err != nil {
+									if err := eventStorage.ZRem(ctx, key, txidStr); err != nil {
 										log.Fatalf("Failed to delete from queue: %v", err)
 									}
 									log.Println("Processed", txid, "in", time.Since(logTime), "as", admit[tm].OutputsToAdmit)
