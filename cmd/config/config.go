@@ -23,32 +23,46 @@ type PeerSettings struct {
 	Broadcast bool `json:"broadcast"`
 }
 
-func main() {
-	var (
-		tokenID     = flag.String("token", "", "Token ID")
-		peerURL     = flag.String("peer", "", "Peer URL")
-		sseFlag     = flag.Bool("sse", false, "Enable SSE")
-		gaspFlag    = flag.Bool("gasp", false, "Enable GASP")
-		broadcastFlag = flag.Bool("broadcast", false, "Enable Broadcast")
-	)
-	flag.Parse()
+// Package-level variables for configuration
+var (
+	eventsURL string
+	tokenID   string
+	peerURL   string
+	sseFlag   bool
+	gaspFlag  bool
+	broadcastFlag bool
+)
 
-	args := flag.Args()
-	if len(args) == 0 {
+func init() {
+	// Load .env file first
+	godotenv.Load(".env")
+	
+	// Define all flags with environment variable defaults
+	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
+	flag.StringVar(&tokenID, "token", "", "Token ID")
+	flag.StringVar(&peerURL, "peer", "", "Peer URL")
+	flag.BoolVar(&sseFlag, "sse", false, "Enable SSE")
+	flag.BoolVar(&gaspFlag, "gasp", false, "Enable GASP")
+	flag.BoolVar(&broadcastFlag, "broadcast", false, "Enable Broadcast")
+}
+
+func main() {
+	// Check if we have at least one argument for the command
+	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
 	}
 	
-	command := args[0]
+	command := os.Args[1]
+	
+	// Parse flags from the remaining arguments (after the command)
+	flag.CommandLine.Parse(os.Args[2:])
 
-	// Load environment
-	godotenv.Load(".env")
-
-	// Create storage using the same configuration as server
+	// Create storage using only eventsURL (config only needs Redis-style operations)
 	storage, err := config.CreateEventStorage(
-		os.Getenv("EVENTS_URL"), 
-		os.Getenv("BEEF_URL"), 
-		os.Getenv("PUBSUB_URL"),
+		eventsURL, 
+		"", // No BEEF storage needed
+		"", // No pub/sub needed
 	)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
@@ -58,24 +72,24 @@ func main() {
 
 	switch command {
 	case "whitelist-add":
-		if *tokenID == "" {
+		if tokenID == "" {
 			log.Fatal("Token ID is required for whitelist-add")
 		}
-		err := storage.SAdd(ctx, WhitelistKey, *tokenID)
+		err := storage.SAdd(ctx, WhitelistKey, tokenID)
 		if err != nil {
 			log.Fatalf("Failed to add token to whitelist: %v", err)
 		}
-		fmt.Printf("Added token %s to whitelist\n", *tokenID)
+		fmt.Printf("Added token %s to whitelist\n", tokenID)
 
 	case "whitelist-remove":
-		if *tokenID == "" {
+		if tokenID == "" {
 			log.Fatal("Token ID is required for whitelist-remove")
 		}
-		err := storage.SRem(ctx, WhitelistKey, *tokenID)
+		err := storage.SRem(ctx, WhitelistKey, tokenID)
 		if err != nil {
 			log.Fatalf("Failed to remove token from whitelist: %v", err)
 		}
-		fmt.Printf("Removed token %s from whitelist\n", *tokenID)
+		fmt.Printf("Removed token %s from whitelist\n", tokenID)
 
 	case "whitelist-list":
 		tokens, err := storage.SMembers(ctx, WhitelistKey)
@@ -92,50 +106,50 @@ func main() {
 		}
 
 	case "peer-add":
-		if *tokenID == "" || *peerURL == "" {
+		if tokenID == "" || peerURL == "" {
 			log.Fatal("Both token ID and peer URL are required for peer-add")
 		}
-		key := PeerConfigKeyPrefix + *tokenID
+		key := PeerConfigKeyPrefix + tokenID
 		settings := PeerSettings{
-			SSE:       *sseFlag,
-			GASP:      *gaspFlag,
-			Broadcast: *broadcastFlag,
+			SSE:       sseFlag,
+			GASP:      gaspFlag,
+			Broadcast: broadcastFlag,
 		}
 		settingsJSON, err := json.Marshal(settings)
 		if err != nil {
 			log.Fatalf("Failed to marshal settings: %v", err)
 		}
-		err = storage.HSet(ctx, key, *peerURL, string(settingsJSON))
+		err = storage.HSet(ctx, key, peerURL, string(settingsJSON))
 		if err != nil {
 			log.Fatalf("Failed to add peer: %v", err)
 		}
 		fmt.Printf("Added peer %s for token %s with settings: SSE=%t, GASP=%t, Broadcast=%t\n", 
-			*peerURL, *tokenID, *sseFlag, *gaspFlag, *broadcastFlag)
+			peerURL, tokenID, sseFlag, gaspFlag, broadcastFlag)
 
 	case "peer-remove":
-		if *tokenID == "" || *peerURL == "" {
+		if tokenID == "" || peerURL == "" {
 			log.Fatal("Both token ID and peer URL are required for peer-remove")
 		}
-		key := PeerConfigKeyPrefix + *tokenID
-		err := storage.HDel(ctx, key, *peerURL)
+		key := PeerConfigKeyPrefix + tokenID
+		err := storage.HDel(ctx, key, peerURL)
 		if err != nil {
 			log.Fatalf("Failed to remove peer: %v", err)
 		}
-		fmt.Printf("Removed peer %s for token %s\n", *peerURL, *tokenID)
+		fmt.Printf("Removed peer %s for token %s\n", peerURL, tokenID)
 
 	case "peer-list":
-		if *tokenID == "" {
+		if tokenID == "" {
 			log.Fatal("Token ID is required for peer-list")
 		}
-		key := PeerConfigKeyPrefix + *tokenID
+		key := PeerConfigKeyPrefix + tokenID
 		peerData, err := storage.HGetAll(ctx, key)
 		if err != nil {
 			log.Fatalf("Failed to get peer config: %v", err)
 		}
 		if len(peerData) == 0 {
-			fmt.Printf("No peers configured for token %s\n", *tokenID)
+			fmt.Printf("No peers configured for token %s\n", tokenID)
 		} else {
-			fmt.Printf("Peers for token %s:\n", *tokenID)
+			fmt.Printf("Peers for token %s:\n", tokenID)
 			for peerURL, settingsJSON := range peerData {
 				var settings PeerSettings
 				if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
@@ -148,13 +162,13 @@ func main() {
 		}
 
 	case "peer-get":
-		if *tokenID == "" || *peerURL == "" {
+		if tokenID == "" || peerURL == "" {
 			log.Fatal("Both token ID and peer URL are required for peer-get")
 		}
-		key := PeerConfigKeyPrefix + *tokenID
-		settingsJSON, err := storage.HGet(ctx, key, *peerURL)
+		key := PeerConfigKeyPrefix + tokenID
+		settingsJSON, err := storage.HGet(ctx, key, peerURL)
 		if err != nil && err.Error() == "redis: nil" {
-			fmt.Printf("Peer %s not found for token %s\n", *peerURL, *tokenID)
+			fmt.Printf("Peer %s not found for token %s\n", peerURL, tokenID)
 		} else if err != nil {
 			log.Fatalf("Failed to get peer config: %v", err)
 		} else {
@@ -163,7 +177,7 @@ func main() {
 				log.Fatalf("Failed to parse settings: %v", err)
 			}
 			fmt.Printf("Peer %s for token %s: SSE=%t, GASP=%t, Broadcast=%t\n", 
-				*peerURL, *tokenID, settings.SSE, settings.GASP, settings.Broadcast)
+				peerURL, tokenID, settings.SSE, settings.GASP, settings.Broadcast)
 		}
 
 	default:
