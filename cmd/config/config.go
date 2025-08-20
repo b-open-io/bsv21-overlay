@@ -25,7 +25,6 @@ type PeerSettings struct {
 
 func main() {
 	var (
-		command     = flag.String("cmd", "", "Command: whitelist-add, whitelist-remove, whitelist-list, peer-add, peer-remove, peer-list, peer-get")
 		tokenID     = flag.String("token", "", "Token ID")
 		peerURL     = flag.String("peer", "", "Peer URL")
 		sseFlag     = flag.Bool("sse", false, "Enable SSE")
@@ -34,10 +33,13 @@ func main() {
 	)
 	flag.Parse()
 
-	if *command == "" {
+	args := flag.Args()
+	if len(args) == 0 {
 		printUsage()
 		os.Exit(1)
 	}
+	
+	command := args[0]
 
 	// Load environment
 	godotenv.Load(".env")
@@ -54,7 +56,7 @@ func main() {
 
 	ctx := context.Background()
 
-	switch *command {
+	switch command {
 	case "whitelist-add":
 		if *tokenID == "" {
 			log.Fatal("Token ID is required for whitelist-add")
@@ -165,7 +167,7 @@ func main() {
 		}
 
 	default:
-		fmt.Printf("Unknown command: %s\n", *command)
+		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
 		os.Exit(1)
 	}
@@ -175,7 +177,7 @@ func printUsage() {
 	fmt.Println("BSV21 Configuration CLI")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  config -cmd <command> [options]")
+	fmt.Println("  config <command> [options]")
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  whitelist-add     Add token to whitelist")
@@ -187,7 +189,6 @@ func printUsage() {
 	fmt.Println("  peer-get          Get specific peer settings")
 	fmt.Println()
 	fmt.Println("Options:")
-	fmt.Println("  -redis <url>      Redis URL (default: redis://localhost:6380)")
 	fmt.Println("  -token <id>       Token ID")
 	fmt.Println("  -peer <url>       Peer URL")
 	fmt.Println("  -sse              Enable SSE for peer")
@@ -196,12 +197,12 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  # Add token to whitelist")
-	fmt.Println("  config -cmd whitelist-add -token ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0")
+	fmt.Println("  config whitelist-add -token ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0")
 	fmt.Println()
 	fmt.Println("  # Add peer with SSE and GASP enabled")
-	fmt.Println("  config -cmd peer-add -token ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 -peer https://bsv21.shruggr.cloud -sse -gasp")
+	fmt.Println("  config peer-add -token ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 -peer https://bsv21.shruggr.cloud -sse -gasp")
 	fmt.Println()
 	fmt.Println("  # List all peers for a token")
-	fmt.Println("  config -cmd peer-list -token ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0")
+	fmt.Println("  config peer-list -token ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0")
 }
 

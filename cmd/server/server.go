@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -17,10 +16,11 @@ import (
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/pubsub"
+	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
+	"github.com/b-open-io/overlay/sync"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
-	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
@@ -32,6 +32,7 @@ import (
 var chaintracker *headers_client.Client
 var PORT int
 var SYNC bool
+var LIBP2P_SYNC bool
 
 const (
 	PeerConfigKeyPrefix = "peers:tm_"
@@ -50,7 +51,7 @@ func loadPeerConfigFromStorage(ctx context.Context, store storage.EventDataStora
 	if err != nil {
 		return nil, fmt.Errorf("failed to get peer config for token %s: %v", tokenId, err)
 	}
-	
+
 	peers := make(map[string]PeerSettings)
 	for peerURL, settingsJSON := range peerData {
 		var settings PeerSettings
@@ -60,7 +61,7 @@ func loadPeerConfigFromStorage(ctx context.Context, store storage.EventDataStora
 		}
 		peers[peerURL] = settings
 	}
-	
+
 	return peers, nil
 }
 
@@ -70,7 +71,7 @@ func getPeersWithSetting(ctx context.Context, store storage.EventDataStorage, to
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var enabledPeers []string
 	for peerURL, settings := range peerConfig {
 		switch settingName {
@@ -89,12 +90,14 @@ func getPeersWithSetting(ctx context.Context, store storage.EventDataStorage, to
 			}
 		}
 	}
-	
+
 	return enabledPeers, nil
 }
 
-var sseSync *pubsub.SSESync                         // Centralized SSE sync manager
-var peerBroadcaster *pubsub.PeerBroadcaster         // Peer transaction broadcaster
+var sseSyncManager *sync.SSESyncManager       // Centralized SSE sync manager
+var libp2pSyncManager *sync.LibP2PSyncManager // LibP2P-based transaction sync manager
+var libp2pSync *pubsub.LibP2PSync             // LibP2P sync instance for routes
+var peerBroadcaster *pubsub.PeerBroadcaster   // Peer transaction broadcaster
 var e *engine.Engine
 
 // Configuration from flags/env
@@ -119,6 +122,7 @@ func init() {
 	// Define command-line flags with env var defaults
 	flag.IntVar(&PORT, "p", PORT, "Port to listen on")
 	flag.BoolVar(&SYNC, "s", false, "Start sync")
+	flag.BoolVar(&LIBP2P_SYNC, "p2p", os.Getenv("LIBP2P_SYNC") == "true", "Enable LibP2P sync")
 	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
 	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
 	flag.StringVar(&redisURL, "redis", os.Getenv("REDIS_URL"), "Redis URL for pub/sub and queues")
@@ -132,90 +136,9 @@ func init() {
 	}
 
 	// Redis configuration is now handled by the storage factory
-	
+
 }
 
-// broadcastMessages handles real-time event broadcasting using PubSub
-func broadcastMessages(ctx context.Context, store storage.EventDataStorage) {
-	pubsub := store.GetPubSub()
-	if pubsub == nil {
-		log.Println("No pub/sub configured, real-time broadcasting disabled")
-		return
-	}
-
-	// Start the pub/sub system
-	if err := pubsub.Start(ctx); err != nil {
-		log.Printf("PubSub start error: %v", err)
-	}
-}
-
-// startSSESync starts centralized SSE sync with configured peers
-func startSSESync(ctx context.Context, store storage.EventDataStorage, tokens []string) {
-	// Build peer-to-topics mapping from storage configuration
-	peerTopics := make(map[string][]string)
-	
-	// Load SSE-enabled peers for each token from storage
-	for _, tokenId := range tokens {
-		topicName := "tm_" + tokenId
-		
-		if peers, err := getPeersWithSetting(ctx, store, tokenId, "sse"); err == nil && len(peers) > 0 {
-			// Build reverse mapping: peer -> topics (only for peers with SSE enabled)
-			for _, peer := range peers {
-				peerTopics[peer] = append(peerTopics[peer], topicName)
-			}
-			log.Printf("Loaded SSE configuration for topic %s with %d peers", topicName, len(peers))
-		}
-	}
-	
-	if len(peerTopics) == 0 {
-		log.Println("No peers configured for SSE sync")
-		return
-	}
-	
-	// Initialize SSE sync with engine and storage
-	sseSync = pubsub.NewSSESync(e, e.Storage)
-	
-	// Start SSE sync
-	if err := sseSync.Start(ctx, peerTopics); err != nil {
-		log.Printf("Failed to start SSE sync: %v", err)
-	} else {
-		log.Printf("Started SSE sync with peers: %v", peerTopics)
-	}
-}
-
-// stopSSESync stops the centralized SSE sync
-func stopSSESync() {
-	if sseSync != nil {
-		sseSync.Stop()
-	}
-}
-
-// setupPeerBroadcasting configures peer broadcasting from storage
-func setupPeerBroadcasting(ctx context.Context, store storage.EventDataStorage, tokens []string) {
-	// Build peer-to-topics mapping for broadcasting
-	peerTopics := make(map[string][]string)
-	
-	// Load broadcast-enabled peers for each token from storage
-	for _, tokenId := range tokens {
-		topicName := "tm_" + tokenId
-		
-		if peers, err := getPeersWithSetting(ctx, store, tokenId, "broadcast"); err == nil && len(peers) > 0 {
-			// Build reverse mapping: peer -> topics (only for peers with broadcast enabled)
-			for _, peer := range peers {
-				peerTopics[peer] = append(peerTopics[peer], topicName)
-			}
-			log.Printf("Loaded broadcast configuration for topic %s with %d peers", topicName, len(peers))
-		}
-	}
-	
-	// Create peer broadcaster with the configured peer-topic mapping
-	if len(peerTopics) > 0 {
-		peerBroadcaster = pubsub.NewPeerBroadcaster(peerTopics)
-		log.Printf("Configured peer broadcaster with %d peers", len(peerTopics))
-	} else {
-		log.Println("No peers configured for broadcasting")
-	}
-}
 
 func main() {
 	// Create a context with cancellation
@@ -231,7 +154,14 @@ func main() {
 		cancel()
 
 		// Stop SSE sync
-		stopSSESync()
+		if sseSyncManager != nil {
+			sseSyncManager.Stop()
+		}
+
+		// Stop LibP2P sync
+		if libp2pSyncManager != nil {
+			libp2pSyncManager.Stop()
+		}
 
 		// Close pub/sub (handled by storage layer)
 		if store != nil {
@@ -308,12 +238,12 @@ func main() {
 			store,
 			[]string{tokenId},
 		)
-		
+
 		// Configure GASP sync peers for this topic from storage
 		gaspPeers, err := getPeersWithSetting(ctx, store, tokenId, "gasp")
 		if err == nil && len(gaspPeers) > 0 {
 			log.Printf("Loaded GASP configuration for topic %s with %d peers", topicName, len(gaspPeers))
-			
+
 			// Configure GASP sync
 			e.SyncConfiguration[topicName] = engine.SyncConfiguration{
 				Type:  engine.SyncConfigurationPeers,
@@ -324,7 +254,26 @@ func main() {
 	}
 
 	// Setup peer broadcasting for transaction submission
-	setupPeerBroadcasting(ctx, store, tokens)
+	// Build peer-to-topics mapping for broadcasting
+	peerTopics := make(map[string][]string)
+	for _, tokenId := range tokens {
+		topicName := "tm_" + tokenId
+		if peers, err := getPeersWithSetting(ctx, store, tokenId, "broadcast"); err == nil && len(peers) > 0 {
+			// Build reverse mapping: peer -> topics (only for peers with broadcast enabled)
+			for _, peer := range peers {
+				peerTopics[peer] = append(peerTopics[peer], topicName)
+			}
+			log.Printf("Loaded broadcast configuration for topic %s with %d peers", topicName, len(peers))
+		}
+	}
+
+	// Create peer broadcaster with the configured peer-topic mapping
+	if len(peerTopics) > 0 {
+		peerBroadcaster = pubsub.NewPeerBroadcaster(peerTopics)
+		log.Printf("Configured peer broadcaster with %d peers", len(peerTopics))
+	} else {
+		log.Println("No peers configured for broadcasting")
+	}
 
 	// Start GASP sync if requested
 	if SYNC {
@@ -334,16 +283,67 @@ func main() {
 				log.Printf("Error starting GASP sync: %v", err)
 			}
 		}()
-		
+
 		// Start SSE clients for topics that have SSE enabled
 		go func() {
 			log.Println("Starting SSE sync...")
-			startSSESync(ctx, store, tokens)
+
+			// Build peer-to-topics mapping from storage configuration
+			ssePeerTopics := make(map[string][]string)
+			for _, tokenId := range tokens {
+				topicName := "tm_" + tokenId
+				if peers, err := getPeersWithSetting(ctx, store, tokenId, "sse"); err == nil && len(peers) > 0 {
+					// Build reverse mapping: peer -> topics (only for peers with SSE enabled)
+					for _, peer := range peers {
+						ssePeerTopics[peer] = append(ssePeerTopics[peer], topicName)
+					}
+					log.Printf("Loaded SSE configuration for topic %s with %d peers", topicName, len(peers))
+				}
+			}
+
+			// Register SSE sync
+			var err error
+			sseSyncManager, err = sync.RegisterSSESync(&sync.SSESyncConfig{
+				Engine:     e,
+				Storage:    store,
+				PeerTopics: ssePeerTopics,
+				Context:    ctx,
+			})
+			if err != nil {
+				log.Printf("Error starting SSE sync: %v", err)
+			}
 		}()
 	}
 
-	// Start broadcasting messages in a separate goroutine
-	go broadcastMessages(ctx, store)
+	// Start LibP2P sync if requested
+	if LIBP2P_SYNC {
+		go func() {
+			log.Println("Starting LibP2P sync...")
+
+			// Build topic list for LibP2P sync
+			topics := make([]string, 0, len(tokens))
+			for _, tokenId := range tokens {
+				topicName := "tm_" + tokenId
+				topics = append(topics, topicName)
+			}
+
+			// Register LibP2P sync
+			var err error
+			libp2pSyncManager, err = sync.RegisterLibP2PSync(&sync.LibP2PSyncConfig{
+				Engine:  e,
+				Storage: store,
+				Topics:  topics,
+				Context: ctx,
+			})
+			if err != nil {
+				log.Printf("Error starting LibP2P sync: %v", err)
+			} else if libp2pSyncManager != nil {
+				// Set global variable for submit route access
+				libp2pSync = libp2pSyncManager.GetLibP2PSync()
+			}
+		}()
+	}
+
 
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
@@ -356,164 +356,16 @@ func main() {
 
 	onesat := app.Group("/api/1sat")
 
-	// Common handler for parsing event query parameters
-	parseEventQuery := func(c *fiber.Ctx) *storage.EventQuestion {
-		// Parse query parameters
-		fromScore := 0.0
-		limit := 100 // default limit
-
-		// Parse 'from' parameter as float64
-		if fromParam := c.Query("from"); fromParam != "" {
-			if score, err := strconv.ParseFloat(fromParam, 64); err == nil {
-				fromScore = score
-			}
-		}
-
-		// Parse 'limit' parameter
-		if limitParam := c.Query("limit"); limitParam != "" {
-			if l, err := strconv.Atoi(limitParam); err == nil && l > 0 {
-				limit = l
-				if limit > 1000 {
-					limit = 1000 // cap at 1000
-				}
-			}
-		}
-
-		return &storage.EventQuestion{
-			Event: c.Params("event"),
-			From:  fromScore,
-			Limit: limit,
-		}
-	}
-
-	// Route for event history
-	onesat.Get("/events/:topic/:event/history", func(c *fiber.Ctx) error {
-		topic := c.Params("topic")
-		event := c.Params("event")
-		log.Printf("Received request for BSV21 event history: %s (topic: %s)", event, topic)
-
-		// Build question and call FindOutputData for history
-		question := parseEventQuery(c)
-		question.Event = event
-		question.Topic = topic
-		question.UnspentOnly = false // History includes all outputs
-		outputs, err := store.FindOutputData(c.Context(), question)
-		if err != nil {
-			log.Printf("History lookup error: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"message": err.Error(),
-			})
-		}
-
-		return c.JSON(outputs)
+	// Register common 1sat routes
+	routes.RegisterCommonRoutes(onesat, &routes.CommonRoutesConfig{
+		Storage:      store,
+		ChainTracker: chaintracker,
 	})
 
-	// POST route for multiple events history
-	onesat.Post("/events/:topic/history", func(c *fiber.Ctx) error {
-		// Parse the request body - accept array of events directly
-		var events []string
-		if err := c.BodyParser(&events); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "Invalid request body",
-			})
-		}
-
-		if len(events) == 0 {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "No events provided",
-			})
-		}
-
-		// Limit the number of events to prevent abuse
-		if len(events) > 100 {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "Too many events (max 100)",
-			})
-		}
-
-		topic := c.Params("topic")
-		log.Printf("Received multi-event history request for %d events (topic: %s)", len(events), topic)
-
-		// Parse query parameters for paging
-		question := parseEventQuery(c)
-		question.Events = events
-		question.Topic = topic
-		question.UnspentOnly = false // History includes all outputs
-
-		outputs, err := store.FindOutputData(c.Context(), question)
-		if err != nil {
-			log.Printf("History lookup error: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"message": "Failed to retrieve event history",
-			})
-		}
-
-		return c.JSON(outputs)
-	})
-
-	// Route for unspent events only
-	onesat.Get("/events/:topic/:event/unspent", func(c *fiber.Ctx) error {
-		topic := c.Params("topic")
-		event := c.Params("event")
-		log.Printf("Received request for unspent BSV21 events: %s (topic: %s)", event, topic)
-
-		// Build question and call FindOutputData for unspent
-		question := parseEventQuery(c)
-		question.Event = event
-		question.Topic = topic
-		question.UnspentOnly = true
-		outputs, err := store.FindOutputData(c.Context(), question)
-		if err != nil {
-			log.Printf("Unspent lookup error: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"message": err.Error(),
-			})
-		}
-
-		return c.JSON(outputs)
-	})
-
-	// POST route for multiple events unspent
-	onesat.Post("/events/:topic/unspent", func(c *fiber.Ctx) error {
-		// Parse the request body - accept array of events directly
-		var events []string
-		if err := c.BodyParser(&events); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "Invalid request body",
-			})
-		}
-
-		if len(events) == 0 {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "No events provided",
-			})
-		}
-
-		// Limit the number of events to prevent abuse
-		if len(events) > 100 {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "Too many events (max 100)",
-			})
-		}
-
-		topic := c.Params("topic")
-		log.Printf("Received multi-event unspent request for %d events (topic: %s)", len(events), topic)
-
-		// Parse query parameters for paging
-		question := parseEventQuery(c)
-		question.Events = events
-		question.Topic = topic
-		question.UnspentOnly = true
-
-		outputs, err := store.FindOutputData(c.Context(), question)
-		if err != nil {
-			log.Printf("Unspent lookup error: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"message": "Failed to retrieve unspent events",
-			})
-		}
-
-		return c.JSON(outputs)
+	// Register SSE streaming routes
+	routes.RegisterSSERoutes(onesat, &routes.SSERoutesConfig{
+		Storage: store,
+		Context: ctx,
 	})
 
 	onesat.Get("/bsv21/:tokenId", func(c *fiber.Ctx) error {
@@ -642,7 +494,7 @@ func main() {
 		log.Printf("Received history request for token %s, %s address %s", tokenId, lockType, address)
 
 		// Parse query parameters for paging
-		question := parseEventQuery(c)
+		question := routes.ParseEventQuery(c)
 		question.Events = []string{event}
 		question.Topic = "tm_" + tokenId
 		question.UnspentOnly = false // History includes all outputs
@@ -772,7 +624,7 @@ func main() {
 		}
 
 		// Parse query parameters for paging
-		question := parseEventQuery(c)
+		question := routes.ParseEventQuery(c)
 		question.Events = events
 		question.Topic = "tm_" + tokenId
 		question.UnspentOnly = false // History includes all outputs
@@ -842,223 +694,11 @@ func main() {
 		return c.JSON(outputs)
 	})
 
-	onesat.Get("/block/tip", func(c *fiber.Ctx) error {
-		// Get current block tip from chaintracker
-		tip, err := chaintracker.GetChaintip(c.Context())
-		if err != nil {
-			log.Printf("Failed to get block tip: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"message": "Failed to get current block tip",
-			})
-		}
-
-		// Return header with height and properly formatted hash strings
-		return c.JSON(fiber.Map{
-			"height":            tip.Height,
-			"hash":              tip.Header.Hash.String(),
-			"version":           tip.Header.Version,
-			"prevBlockHash":     tip.Header.PreviousBlock.String(),
-			"merkleRoot":        tip.Header.MerkleRoot.String(),
-			"creationTimestamp": tip.Header.Timestamp,
-			"difficultyTarget":  tip.Header.Bits,
-			"nonce":             tip.Header.Nonce,
-		})
-	})
-
-	onesat.Get("/block/:height", func(c *fiber.Ctx) error {
-		heightStr := c.Params("height")
-
-		// Parse height as uint32
-		height64, err := strconv.ParseUint(heightStr, 10, 32)
-		if err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "Invalid height parameter",
-			})
-		}
-		height := uint32(height64)
-
-		// Get block header by height
-		blockHeader, err := chaintracker.BlockByHeight(c.Context(), height)
-		if err != nil {
-			log.Printf("Failed to get block header for height %d: %v", height, err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"message": "Failed to get block header",
-			})
-		}
-
-		// Return header with height and properly formatted hash strings
-		return c.JSON(fiber.Map{
-			"height":            height,
-			"hash":              blockHeader.Hash.String(),
-			"version":           blockHeader.Version,
-			"prevBlockHash":     blockHeader.PreviousBlock.String(),
-			"merkleRoot":        blockHeader.MerkleRoot.String(),
-			"creationTimestamp": blockHeader.Timestamp,
-			"difficultyTarget":  blockHeader.Bits,
-			"nonce":             blockHeader.Nonce,
-		})
-	})
-
-	// Add custom BSV21-specific routes
-	onesat.Get("/subscribe/:events", func(c *fiber.Ctx) error {
-		events := strings.Split(c.Params("events"), ",")
-		log.Printf("Subscription request for events: %v", events)
-
-		c.Set("Content-Type", "text/event-stream")
-		c.Set("Cache-Control", "no-cache")
-		c.Set("Connection", "keep-alive")
-		c.Set("Transfer-Encoding", "chunked")
-		c.Set("X-Accel-Buffering", "no")
-		c.Set("Access-Control-Allow-Origin", "*")
-
-		// Check for Last-Event-ID header for resumption
-		lastEventID := c.Get("Last-Event-ID")
-		var fromScore float64
-		if lastEventID != "" {
-			if score, err := strconv.ParseFloat(lastEventID, 64); err == nil {
-				fromScore = score
-				log.Printf("Resuming from score: %f", fromScore)
-			}
-		}
-
-		// Create a channel for this client to signal when to close
-		clientDone := make(chan struct{})
-
-		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-			// If resuming, first send any missed events using storage
-			if fromScore > 0 {
-				// For each event, get recent events since the last score
-				for _, event := range events {
-					// For BSV21, if event starts with "tm_", it's a topic, otherwise extract tokenId
-					var topic string
-					if strings.HasPrefix(event, "tm_") {
-						topic = event
-					} else {
-						// Extract tokenId from event patterns like "p2pkh:address:tokenId"
-						parts := strings.Split(event, ":")
-						if len(parts) >= 3 {
-							tokenId := parts[len(parts)-1] // Last part is tokenId
-							topic = "tm_" + tokenId
-						} else {
-							continue // Skip malformed events
-						}
-					}
-					
-					if recentEvents, err := store.LookupEventScores(ctx, topic, event, fromScore); err == nil {
-						// Send each missed event with its actual score
-						for _, eventScore := range recentEvents {
-							fmt.Fprintf(w, "data: %s\n", eventScore.Member)
-							fmt.Fprintf(w, "id: %.0f\n\n", eventScore.Score)
-							if err := w.Flush(); err != nil {
-								return // Connection closed
-							}
-						}
-					}
-				}
-			}
-
-			// Send initial connection message
-			fmt.Fprintf(w, "data: Connected to events: %s\n\n", strings.Join(events, ", "))
-			if err := w.Flush(); err != nil {
-				return // Connection closed
-			}
-
-			// Register this client for each event with PubSub
-			if ps := store.GetPubSub(); ps != nil {
-				// Create SSE manager if needed and register client
-				sseManager := pubsub.NewSSEManager(ps)
-				for _, event := range events {
-					sseManager.AddSSEClient(event, w)
-				}
-
-				// Start the SSE manager to listen for events
-				if err := sseManager.Start(ctx); err != nil {
-					fmt.Fprintf(w, "data: Error starting SSE manager: %v\n\n", err)
-					w.Flush()
-					return
-				}
-
-				// Cleanup function
-				defer func() {
-					// Stop the SSE manager and remove the client when disconnected
-					sseManager.Stop()
-					for _, event := range events {
-						sseManager.RemoveSSEClient(event, w)
-					}
-					close(clientDone)
-				}()
-			}
-
-			// Keep connection alive - wait for context cancellation
-			<-ctx.Done()
-		})
-
-		return nil
-	})
-
-	// Add custom submit route with peer broadcasting
-	app.Post("/api/v1/submit", func(c *fiber.Ctx) error {
-		// Parse x-topics header
-		topicsHeader := c.Get("x-topics")
-		if topicsHeader == "" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "x-topics header is required",
-			})
-		}
-		
-		topics := strings.Split(topicsHeader, ",")
-		for i, topic := range topics {
-			topics[i] = strings.TrimSpace(topic)
-		}
-		
-		// Read BEEF body
-		beef := c.Body()
-		if len(beef) == 0 {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "BEEF transaction data is required",
-			})
-		}
-		
-		// Create TaggedBEEF
-		taggedBEEF := overlay.TaggedBEEF{
-			Beef:   beef,
-			Topics: topics,
-		}
-		
-		// Submit to local engine
-		steak, err := e.Submit(c.Context(), taggedBEEF, engine.SubmitModeCurrent, nil)
-		if err != nil {
-			log.Printf("Failed to submit transaction locally: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"message": "Failed to process transaction",
-			})
-		}
-		
-		// Build TaggedBEEF with only successfully processed topics for peer broadcasting
-		if peerBroadcaster != nil && len(steak) > 0 {
-			successfulTopics := make([]string, 0, len(steak))
-			for topic := range steak {
-				successfulTopics = append(successfulTopics, topic)
-			}
-			
-			// Only broadcast topics that were successfully processed
-			broadcastBEEF := overlay.TaggedBEEF{
-				Beef:   beef,
-				Topics: successfulTopics,
-			}
-			
-			go func() {
-				if err := peerBroadcaster.BroadcastTransaction(context.Background(), broadcastBEEF); err != nil {
-					log.Printf("Failed to broadcast transaction to peers: %v", err)
-				}
-			}()
-		}
-		
-		// Return success response (matching overlay service format)
-		return c.JSON(fiber.Map{
-			"description": "Overlay engine successfully processed the submitted transaction",
-			"steak":       steak,
-		})
+	// Register enhanced submit route with peer broadcasting
+	routes.RegisterSubmitRoutes(app, &routes.SubmitRoutesConfig{
+		Engine:          e,
+		LibP2PSync:      libp2pSync, // Will be set by LibP2P sync initialization if enabled
+		PeerBroadcaster: peerBroadcaster,
 	})
 
 	// Register overlay service routes using server pattern (excluding submit route)
