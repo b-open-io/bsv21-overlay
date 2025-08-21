@@ -147,15 +147,15 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 			continue // Skip blacklisted tokens
 		}
 		
-		topicName := "tm_" + tokenId
+		topic := "tm_" + tokenId
 		
 		// Reuse existing manager if available
-		if existingManager, exists := eng.Managers[topicName]; exists {
-			newManagers[topicName] = existingManager
+		if existingManager, exists := eng.Managers[topic]; exists {
+			newManagers[topic] = existingManager
 		} else {
 			// Create new topic manager
-			newManagers[topicName] = topics.NewBsv21ValidatedTopicManager(
-				topicName,
+			newManagers[topic] = topics.NewBsv21ValidatedTopicManager(
+				topic,
 				store,
 				[]string{tokenId},
 			)
@@ -163,7 +163,7 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 		
 		// Configure GASP sync peers for this topic
 		if gaspPeers, err := getPeersWithSetting(ctx, store, tokenId, "gasp"); err == nil && len(gaspPeers) > 0 {
-			eng.SyncConfiguration[topicName] = engine.SyncConfiguration{
+			eng.SyncConfiguration[topic] = engine.SyncConfiguration{
 				Type:  engine.SyncConfigurationPeers,
 				Peers: gaspPeers,
 			}
@@ -172,7 +172,7 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 		// Configure broadcast peers for this topic
 		if broadcastPeers, err := getPeersWithSetting(ctx, store, tokenId, "broadcast"); err == nil && len(broadcastPeers) > 0 {
 			for _, peer := range broadcastPeers {
-				peerTopics[peer] = append(peerTopics[peer], topicName)
+				peerTopics[peer] = append(peerTopics[peer], topic)
 			}
 		}
 		
@@ -188,22 +188,22 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 		}
 		
 		// Skip if already processed in whitelist
-		topicName := "tm_" + tokenId
-		if _, exists := newManagers[topicName]; exists {
+		topic := "tm_" + tokenId
+		if _, exists := newManagers[topic]; exists {
 			continue
 		}
 		
 		// Reuse existing manager if available
-		if existingManager, exists := eng.Managers[topicName]; exists {
-			newManagers[topicName] = existingManager
+		if existingManager, exists := eng.Managers[topic]; exists {
+			newManagers[topic] = existingManager
 		} else {
 			// Create new basic topic manager (no peer config)
-			newManagers[topicName] = topics.NewBsv21ValidatedTopicManager(
-				topicName,
+			newManagers[topic] = topics.NewBsv21ValidatedTopicManager(
+				topic,
 				store,
 				[]string{tokenId},
 			)
-			log.Printf("Created topic manager for active token: %s (balance: %.0f)", topicName, scoreItem.Score)
+			log.Printf("Created topic manager for active token: %s (balance: %.0f)", topic, scoreItem.Score)
 		}
 		
 		activeCount++
@@ -381,13 +381,13 @@ func main() {
 			}
 			
 			for _, tokenId := range whitelistTokens {
-				topicName := "tm_" + tokenId
+				topic := "tm_" + tokenId
 				if peers, err := getPeersWithSetting(ctx, store, tokenId, "sse"); err == nil && len(peers) > 0 {
 					// Build reverse mapping: peer -> topics (only for peers with SSE enabled)
 					for _, peer := range peers {
-						ssePeerTopics[peer] = append(ssePeerTopics[peer], topicName)
+						ssePeerTopics[peer] = append(ssePeerTopics[peer], topic)
 					}
-					log.Printf("Loaded SSE configuration for topic %s with %d peers", topicName, len(peers))
+					log.Printf("Loaded SSE configuration for topic %s with %d peers", topic, len(peers))
 				}
 			}
 
@@ -420,8 +420,8 @@ func main() {
 			
 			topics := make([]string, 0, len(whitelistTokens))
 			for _, tokenId := range whitelistTokens {
-				topicName := "tm_" + tokenId
-				topics = append(topics, topicName)
+				topic := "tm_" + tokenId
+				topics = append(topics, topic)
 			}
 
 			// Register LibP2P sync
@@ -475,6 +475,7 @@ func main() {
 	routes.RegisterCommonRoutes(onesat, &routes.CommonRoutesConfig{
 		Storage:      store,
 		ChainTracker: chaintracker,
+		Engine:       e,
 	})
 
 	// Register SSE streaming routes
@@ -486,6 +487,14 @@ func main() {
 	onesat.Get("/bsv21/:tokenId", func(c *fiber.Ctx) error {
 		tokenIdStr := c.Params("tokenId")
 		log.Printf("Received request for BSV21 token details: %s", tokenIdStr)
+
+		// Validate tokenId is active
+		topic := "tm_" + tokenIdStr
+		if _, exists := e.Managers[topic]; !exists {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"message": "Topic not available",
+			})
+		}
 
 		// Parse the tokenId string into an outpoint
 		outpoint, err := transaction.OutpointFromString(tokenIdStr)
@@ -526,6 +535,14 @@ func main() {
 
 		log.Printf("Received block request for BSV21 tokenId: %s at height: %s", tokenId, heightStr)
 
+		// Validate tokenId is active
+		topic := "tm_" + tokenId
+		if _, exists := e.Managers[topic]; !exists {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"message": "Topic not available",
+			})
+		}
+
 		// Parse height as uint32
 		height64, err := strconv.ParseUint(heightStr, 10, 32)
 		if err != nil {
@@ -536,8 +553,6 @@ func main() {
 		height := uint32(height64)
 
 		// Get transactions from storage for the specific token's topic at this height
-		// Use the topic manager ID format: tm_<tokenId>
-		topic := "tm_" + tokenId
 		transactions, err := store.GetTransactionsByTopicAndHeight(c.Context(), topic, height)
 		if err != nil {
 			log.Printf("GetBlockData error: %v", err)
@@ -581,6 +596,14 @@ func main() {
 
 		log.Printf("Received transaction request for BSV21 tokenId: %s, txid: %s", tokenId, txidStr)
 
+		// Validate tokenId is active
+		topic := "tm_" + tokenId
+		if _, exists := e.Managers[topic]; !exists {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"message": "Topic not available",
+			})
+		}
+
 		// Parse the txid string into a hash
 		txid, err := chainhash.NewHashFromHex(txidStr)
 		if err != nil {
@@ -589,9 +612,6 @@ func main() {
 				"message": "Invalid transaction ID format",
 			})
 		}
-
-		// Use the topic manager ID format: tm_<tokenId>
-		topic := "tm_" + tokenId
 
 		// Check if BEEF should be included (optional query parameter)
 		includeBeef := c.Query("beef") == "true"
@@ -621,6 +641,14 @@ func main() {
 		lockType := c.Params("lockType")
 		address := c.Params("address")
 
+		// Validate tokenId is active
+		topic := "tm_" + tokenId
+		if _, exists := e.Managers[topic]; !exists {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"message": "Topic not available",
+			})
+		}
+
 		// Build event string from lockType, address, and tokenId
 		event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
 		log.Printf("Received balance request for token %s, %s address %s", tokenId, lockType, address)
@@ -645,6 +673,14 @@ func main() {
 		lockType := c.Params("lockType")
 		address := c.Params("address")
 
+		// Validate tokenId is active
+		topic := "tm_" + tokenId
+		if _, exists := e.Managers[topic]; !exists {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"message": "Topic not available",
+			})
+		}
+
 		// Build event string from lockType, address, and tokenId
 		event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
 		log.Printf("Received history request for token %s, %s address %s", tokenId, lockType, address)
@@ -652,7 +688,7 @@ func main() {
 		// Parse query parameters for paging
 		question := routes.ParseEventQuery(c)
 		question.Events = []string{event}
-		question.Topic = "tm_" + tokenId
+		question.Topic = topic
 		question.UnspentOnly = false // History includes all outputs
 
 		outputs, err := store.FindOutputData(c.Context(), question)
@@ -670,6 +706,14 @@ func main() {
 		tokenId := c.Params("tokenId")
 		lockType := c.Params("lockType")
 		address := c.Params("address")
+
+		// Validate tokenId is active
+		topic := "tm_" + tokenId
+		if _, exists := e.Managers[topic]; !exists {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"message": "Topic not available",
+			})
+		}
 
 		// Build event string from lockType, address, and tokenId
 		event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
@@ -698,6 +742,14 @@ func main() {
 	onesat.Post("/bsv21/:tokenId/:lockType/balance", func(c *fiber.Ctx) error {
 		tokenId := c.Params("tokenId")
 		lockType := c.Params("lockType")
+
+		// Validate tokenId is active
+		topic := "tm_" + tokenId
+		if _, exists := e.Managers[topic]; !exists {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"message": "Topic not available",
+			})
+		}
 
 		// Parse the request body - accept array of addresses directly
 		var addresses []string
@@ -749,6 +801,14 @@ func main() {
 		tokenId := c.Params("tokenId")
 		lockType := c.Params("lockType")
 
+		// Validate tokenId is active
+		topic := "tm_" + tokenId
+		if _, exists := e.Managers[topic]; !exists {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"message": "Topic not available",
+			})
+		}
+
 		// Parse the request body - accept array of addresses directly
 		var addresses []string
 		if err := c.BodyParser(&addresses); err != nil {
@@ -782,7 +842,7 @@ func main() {
 		// Parse query parameters for paging
 		question := routes.ParseEventQuery(c)
 		question.Events = events
-		question.Topic = "tm_" + tokenId
+		question.Topic = topic
 		question.UnspentOnly = false // History includes all outputs
 
 		outputs, err := store.FindOutputData(c.Context(), question)
@@ -800,6 +860,14 @@ func main() {
 	onesat.Post("/bsv21/:tokenId/:lockType/unspent", func(c *fiber.Ctx) error {
 		tokenId := c.Params("tokenId")
 		lockType := c.Params("lockType")
+
+		// Validate tokenId is active
+		topic := "tm_" + tokenId
+		if _, exists := e.Managers[topic]; !exists {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"message": "Topic not available",
+			})
+		}
 
 		// Parse the request body - accept array of addresses directly
 		var addresses []string

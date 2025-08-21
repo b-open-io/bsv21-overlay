@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Launch file",
             "type": "go",
@@ -39,9 +40,7 @@
             "cwd": "${workspaceFolder}",
             "env": {
                 "HEADERS_URL": "http://localhost:8080",
-                "REDIS_URL": "redis://localhost:6380",
                 "BEEF_URL": "redis://localhost:6666",
-                "EVENTS_URL": "mongodb://mongo:mongo@localhost:27017",
             },
             "args": [
                 "-p=8000"
