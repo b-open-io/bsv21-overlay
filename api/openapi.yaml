@@ -277,6 +277,48 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/1sat/bsv21/{tokenId}/tx/{txid}:
+    get:
+      tags:
+        - 1sat-bsv21
+      summary: Get single transaction details
+      description: Returns a single BSV21 token transaction by transaction ID with optional BEEF data
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Token ID to query
+          example: "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"
+        - name: txid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Transaction ID to query
+          example: "def456789abc123456789def456789abc123456789def456789abc123456789def"
+        - name: beef
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Include BEEF data in the response
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/1sat/bsv21/{tokenId}/{lockType}/{address}/history:
     get:
       tags:
@@ -1014,6 +1056,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OutputData'
+        beef:
+          type: string
+          format: byte
+          description: Optional BEEF data for transaction reconstruction
+          nullable: true
 
     OutputData:
       type: object

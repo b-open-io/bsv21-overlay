@@ -23,6 +23,7 @@ import (
 	"github.com/b-open-io/overlay/sync"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
+	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
@@ -572,6 +573,47 @@ func main() {
 		}
 
 		return c.JSON(response)
+	})
+
+	onesat.Get("/bsv21/:tokenId/tx/:txid", func(c *fiber.Ctx) error {
+		tokenId := c.Params("tokenId")
+		txidStr := c.Params("txid")
+
+		log.Printf("Received transaction request for BSV21 tokenId: %s, txid: %s", tokenId, txidStr)
+
+		// Parse the txid string into a hash
+		txid, err := chainhash.NewHashFromHex(txidStr)
+		if err != nil {
+			log.Printf("Invalid transaction ID format: %v", err)
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "Invalid transaction ID format",
+			})
+		}
+
+		// Use the topic manager ID format: tm_<tokenId>
+		topic := "tm_" + tokenId
+
+		// Check if BEEF should be included (optional query parameter)
+		includeBeef := c.Query("beef") == "true"
+
+		// Get single transaction from storage with optional BEEF
+		transaction, err := store.GetTransactionByTopic(c.Context(), topic, txid, includeBeef)
+		if err != nil {
+			log.Printf("GetTransactionByTopic error: %v", err)
+
+			// Determine appropriate status code based on error
+			if err.Error() == "transaction not found" {
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+					"message": "Transaction not found",
+				})
+			}
+
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"message": "Failed to retrieve transaction details",
+			})
+		}
+
+		return c.JSON(transaction)
 	})
 
 	onesat.Get("/bsv21/:tokenId/:lockType/:address/balance", func(c *fiber.Ctx) error {
