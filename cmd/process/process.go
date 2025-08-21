@@ -42,7 +42,8 @@ func init() {
 	eventStorage, err = config.CreateEventStorage(
 		os.Getenv("EVENTS_URL"), 
 		os.Getenv("BEEF_URL"), 
-		os.Getenv("REDIS_URL"),
+		os.Getenv("QUEUE_URL"),
+		os.Getenv("PUBSUB_URL"),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
@@ -71,10 +72,11 @@ func main() {
 	}()
 
 	// Define whitelist key
+	queueStore := eventStorage.GetQueueStorage()
 	const whitelistKey = "bsv21:whitelist"
 
 	// Log current whitelist
-	if tokens, err := eventStorage.SMembers(ctx, whitelistKey); err == nil {
+	if tokens, err := queueStore.SMembers(ctx, whitelistKey); err == nil {
 		log.Printf("Token whitelist: %v", tokens)
 	} else {
 		log.Printf("Failed to get token whitelist: %v", err)
@@ -127,7 +129,7 @@ func main() {
 		}
 
 		// Get whitelisted tokens
-		whitelistedTokens, err := eventStorage.SMembers(ctx, whitelistKey)
+		whitelistedTokens, err := queueStore.SMembers(ctx, whitelistKey)
 		if err != nil {
 			log.Printf("Failed to get whitelisted tokens: %v", err)
 			time.Sleep(5 * time.Second)
@@ -142,7 +144,7 @@ func main() {
 			key := "tok:" + tokenId
 
 			// Check if this token has any transactions to process
-			members, err := eventStorage.ZRangeByScore(ctx, key, -1e9, 1e9, 0, 1)
+			members, err := queueStore.ZRangeByScore(ctx, key, -1e9, 1e9, 0, 1)
 			if err != nil {
 				log.Printf("Failed to check existence of key %s: %v", key, err)
 				continue
@@ -188,7 +190,7 @@ func main() {
 					}
 
 					// start := time.Now()
-					members, err := eventStorage.ZRangeByScore(ctx, key, -1e9, 1e9, 0, 0)
+					members, err := queueStore.ZRangeByScore(ctx, key, -1e9, 1e9, 0, 0)
 					if err != nil {
 						log.Fatalf("Failed to query Redis: %v", err)
 					}
@@ -234,7 +236,7 @@ func main() {
 								} else {
 									// log.Println("Submitted generated", tx.TxID().String(), "in", time.Since(logTime))
 									// logTime = time.Now()
-									if err := eventStorage.ZRem(ctx, key, txidStr); err != nil {
+									if err := queueStore.ZRem(ctx, key, txidStr); err != nil {
 										log.Fatalf("Failed to delete from queue: %v", err)
 									}
 									log.Println("Processed", txid, "in", time.Since(logTime), "as", admit[tm].OutputsToAdmit)

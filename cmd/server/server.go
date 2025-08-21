@@ -16,6 +16,7 @@ import (
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/pubsub"
+	"github.com/b-open-io/overlay/queue"
 	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/b-open-io/overlay/sync"
@@ -46,8 +47,9 @@ type PeerSettings struct {
 
 // loadPeerConfigFromStorage reads peer configuration from storage for a given token
 func loadPeerConfigFromStorage(ctx context.Context, store storage.EventDataStorage, tokenId string) (map[string]PeerSettings, error) {
+	queueStore := store.GetQueueStorage()
 	key := PeerConfigKeyPrefix + tokenId
-	peerData, err := store.HGetAll(ctx, key)
+	peerData, err := queueStore.HGetAll(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get peer config for token %s: %v", tokenId, err)
 	}
@@ -100,11 +102,127 @@ var libp2pSync *pubsub.LibP2PSync             // LibP2P sync instance for routes
 var peerBroadcaster *pubsub.PeerBroadcaster   // Peer transaction broadcaster
 var e *engine.Engine
 
+// RegisterTopics manages topic managers and peer configurations dynamically
+func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.EventDataStorage, peerTopics map[string][]string) error {
+	queueStore := store.GetQueueStorage()
+	
+	// Load blacklist once for fast O(1) lookups
+	blacklist := make(map[string]struct{})
+	if blacklisted, err := queueStore.SMembers(ctx, "bsv21:blacklist"); err == nil {
+		for _, token := range blacklisted {
+			blacklist[token] = struct{}{}
+		}
+	}
+	
+	// Get whitelist tokens
+	whitelistTokens, err := queueStore.SMembers(ctx, "bsv21:whitelist")
+	if err != nil {
+		log.Printf("Failed to get whitelist: %v", err)
+		whitelistTokens = []string{}
+	}
+	
+	// Get active balance tokens
+	activeBalances, err := queueStore.ZRangeByScore(ctx, "bsv21:active", 1, 1e9, 0, 0) // Only positive balances
+	if err != nil {
+		log.Printf("Failed to get active balances: %v", err)
+		activeBalances = []queue.ScoredMember{}
+	}
+	
+	// Build new managers map
+	newManagers := make(map[string]engine.TopicManager)
+	
+	// Clear and rebuild peer topics map
+	for k := range peerTopics {
+		delete(peerTopics, k)
+	}
+	
+	whitelistCount := 0
+	activeCount := 0
+	
+	// Process whitelist tokens (with full peer configuration)
+	for _, tokenId := range whitelistTokens {
+		if _, isBlacklisted := blacklist[tokenId]; isBlacklisted {
+			continue // Skip blacklisted tokens
+		}
+		
+		topicName := "tm_" + tokenId
+		
+		// Reuse existing manager if available
+		if existingManager, exists := eng.Managers[topicName]; exists {
+			newManagers[topicName] = existingManager
+		} else {
+			// Create new topic manager
+			newManagers[topicName] = topics.NewBsv21ValidatedTopicManager(
+				topicName,
+				store,
+				[]string{tokenId},
+			)
+			log.Printf("Created topic manager: %s", topicName)
+		}
+		
+		// Configure GASP sync peers for this topic
+		if gaspPeers, err := getPeersWithSetting(ctx, store, tokenId, "gasp"); err == nil && len(gaspPeers) > 0 {
+			eng.SyncConfiguration[topicName] = engine.SyncConfiguration{
+				Type:  engine.SyncConfigurationPeers,
+				Peers: gaspPeers,
+			}
+		}
+		
+		// Configure broadcast peers for this topic
+		if broadcastPeers, err := getPeersWithSetting(ctx, store, tokenId, "broadcast"); err == nil && len(broadcastPeers) > 0 {
+			for _, peer := range broadcastPeers {
+				peerTopics[peer] = append(peerTopics[peer], topicName)
+			}
+		}
+		
+		whitelistCount++
+	}
+	
+	// Process active balance tokens (basic topic managers only)
+	for _, scoreItem := range activeBalances {
+		tokenId := scoreItem.Member
+		
+		if _, isBlacklisted := blacklist[tokenId]; isBlacklisted {
+			continue // Skip blacklisted tokens
+		}
+		
+		// Skip if already processed in whitelist
+		topicName := "tm_" + tokenId
+		if _, exists := newManagers[topicName]; exists {
+			continue
+		}
+		
+		// Reuse existing manager if available
+		if existingManager, exists := eng.Managers[topicName]; exists {
+			newManagers[topicName] = existingManager
+		} else {
+			// Create new basic topic manager (no peer config)
+			newManagers[topicName] = topics.NewBsv21ValidatedTopicManager(
+				topicName,
+				store,
+				[]string{tokenId},
+			)
+			log.Printf("Created topic manager for active token: %s (balance: %.0f)", topicName, scoreItem.Score)
+		}
+		
+		activeCount++
+	}
+	
+	// Replace engine managers with new map
+	eng.Managers = newManagers
+	
+	log.Printf("Registered %d topic managers (%d whitelist + %d active, %d blacklisted), %d broadcast peers", 
+		len(newManagers), whitelistCount, activeCount, len(blacklist), len(peerTopics))
+	
+	return nil
+}
+
 // Configuration from flags/env
 var (
 	eventsURL string
 	beefURL   string
-	redisURL  string
+	queueURL  string
+	pubsubURL string
 )
 
 func init() {
@@ -125,7 +243,8 @@ func init() {
 	flag.BoolVar(&LIBP2P_SYNC, "p2p", os.Getenv("LIBP2P_SYNC") == "true", "Enable LibP2P sync")
 	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
 	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
-	flag.StringVar(&redisURL, "redis", os.Getenv("REDIS_URL"), "Redis URL for pub/sub and queues")
+	flag.StringVar(&queueURL, "queue", os.Getenv("QUEUE_URL"), "Queue storage URL")
+	flag.StringVar(&pubsubURL, "pubsub", os.Getenv("PUBSUB_URL"), "PubSub URL")
 	flag.Parse()
 	// Apply defaults
 	if PORT == 0 {
@@ -134,8 +253,6 @@ func init() {
 	if beefURL == "" {
 		beefURL = "./beef_storage"
 	}
-
-	// Redis configuration is now handled by the storage factory
 
 }
 
@@ -194,7 +311,7 @@ func main() {
 
 	// Create storage using the cleaned up configuration
 	var err error
-	store, err = config.CreateEventStorage(eventsURL, beefURL, redisURL)
+	store, err = config.CreateEventStorage(eventsURL, beefURL, queueURL, pubsubURL)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
@@ -223,57 +340,20 @@ func main() {
 		ChainTracker: chaintracker,
 	}
 
-	// Load topic managers dynamically from whitelist
-	const whitelistKey = "bsv21:whitelist"
-	tokens, err := store.SMembers(ctx, whitelistKey)
-	if err != nil {
-		log.Fatalf("Failed to get whitelisted tokens: %v", err)
-	}
-	log.Printf("Loading whitelisted tokens: %v", tokens)
-	for _, tokenId := range tokens {
-		topicName := "tm_" + tokenId
-		log.Println("Adding topic manager:", topicName)
-		e.Managers[topicName] = topics.NewBsv21ValidatedTopicManager(
-			topicName,
-			store,
-			[]string{tokenId},
-		)
-
-		// Configure GASP sync peers for this topic from storage
-		gaspPeers, err := getPeersWithSetting(ctx, store, tokenId, "gasp")
-		if err == nil && len(gaspPeers) > 0 {
-			log.Printf("Loaded GASP configuration for topic %s with %d peers", topicName, len(gaspPeers))
-
-			// Configure GASP sync
-			e.SyncConfiguration[topicName] = engine.SyncConfiguration{
-				Type:  engine.SyncConfigurationPeers,
-				Peers: gaspPeers,
-			}
-			log.Printf("Configured GASP sync for topic %s with peers: %v", topicName, gaspPeers)
-		}
+	// Initialize peer topics map
+	peerTopics := make(map[string][]string)
+	
+	// Register topic managers for active and whitelisted tokens (populates peerTopics)
+	if err := RegisterTopics(ctx, e, store, peerTopics); err != nil {
+		log.Fatalf("Failed to register topics: %v", err)
 	}
 
 	// Setup peer broadcasting for transaction submission
-	// Build peer-to-topics mapping for broadcasting
-	peerTopics := make(map[string][]string)
-	for _, tokenId := range tokens {
-		topicName := "tm_" + tokenId
-		if peers, err := getPeersWithSetting(ctx, store, tokenId, "broadcast"); err == nil && len(peers) > 0 {
-			// Build reverse mapping: peer -> topics (only for peers with broadcast enabled)
-			for _, peer := range peers {
-				peerTopics[peer] = append(peerTopics[peer], topicName)
-			}
-			log.Printf("Loaded broadcast configuration for topic %s with %d peers", topicName, len(peers))
-		}
-	}
+	// peerTopics map is already populated by RegisterTopics
 
-	// Create peer broadcaster with the configured peer-topic mapping
-	if len(peerTopics) > 0 {
-		peerBroadcaster = pubsub.NewPeerBroadcaster(peerTopics)
-		log.Printf("Configured peer broadcaster with %d peers", len(peerTopics))
-	} else {
-		log.Println("No peers configured for broadcasting")
-	}
+	// Create peer broadcaster (always create, works with empty map)
+	peerBroadcaster = pubsub.NewPeerBroadcaster(peerTopics)
+	log.Printf("Configured peer broadcaster with %d peers", len(peerTopics))
 
 	// Start GASP sync if requested
 	if SYNC {
@@ -288,9 +368,18 @@ func main() {
 		go func() {
 			log.Println("Starting SSE sync...")
 
-			// Build peer-to-topics mapping from storage configuration
+			// Build peer-to-topics mapping from storage configuration (whitelist only)
 			ssePeerTopics := make(map[string][]string)
-			for _, tokenId := range tokens {
+			
+			// Get whitelist tokens for SSE configuration
+			queueStore := store.GetQueueStorage()
+			whitelistTokens, sseErr := queueStore.SMembers(ctx, "bsv21:whitelist")
+			if sseErr != nil {
+				log.Printf("Failed to get whitelist for SSE sync: %v", sseErr)
+				return
+			}
+			
+			for _, tokenId := range whitelistTokens {
 				topicName := "tm_" + tokenId
 				if peers, err := getPeersWithSetting(ctx, store, tokenId, "sse"); err == nil && len(peers) > 0 {
 					// Build reverse mapping: peer -> topics (only for peers with SSE enabled)
@@ -320,16 +409,22 @@ func main() {
 		go func() {
 			log.Println("Starting LibP2P sync...")
 
-			// Build topic list for LibP2P sync
-			topics := make([]string, 0, len(tokens))
-			for _, tokenId := range tokens {
+			// Build topic list for LibP2P sync (whitelist only)
+			queueStore := store.GetQueueStorage()
+			whitelistTokens, libp2pErr := queueStore.SMembers(ctx, "bsv21:whitelist")
+			if libp2pErr != nil {
+				log.Printf("Failed to get whitelist for LibP2P sync: %v", libp2pErr)
+				return
+			}
+			
+			topics := make([]string, 0, len(whitelistTokens))
+			for _, tokenId := range whitelistTokens {
 				topicName := "tm_" + tokenId
 				topics = append(topics, topicName)
 			}
 
 			// Register LibP2P sync
-			var err error
-			libp2pSyncManager, err = sync.RegisterLibP2PSync(&sync.LibP2PSyncConfig{
+			libp2pSyncManager, err := sync.RegisterLibP2PSync(&sync.LibP2PSyncConfig{
 				Engine:  e,
 				Storage: store,
 				Topics:  topics,
@@ -352,7 +447,7 @@ func main() {
 	app.Use(logger.New())
 
 	// Setup OpenAPI documentation
-	setupOpenAPIDocumentation(app)
+	// TODO: setupOpenAPIDocumentation(app)
 
 	onesat := app.Group("/api/1sat")
 

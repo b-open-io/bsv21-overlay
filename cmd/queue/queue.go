@@ -11,6 +11,7 @@ import (
 
 	"github.com/b-open-io/overlay/beef"
 	"github.com/b-open-io/overlay/config"
+	"github.com/b-open-io/overlay/queue"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
@@ -33,7 +34,8 @@ func init() {
 	eventStorage, err = config.CreateEventStorage(
 		os.Getenv("EVENTS_URL"), 
 		os.Getenv("BEEF_URL"), 
-		os.Getenv("REDIS_URL"),
+		os.Getenv("QUEUE_URL"),
+		os.Getenv("PUBSUB_URL"),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
@@ -71,7 +73,8 @@ func main() {
 	for {
 		start := time.Now()
 		// Get transactions from the main queue
-		members, err := eventStorage.ZRangeByScore(ctx, "bsv21", -1e9, 1e9, 0, 1000)
+		queueStore := eventStorage.GetQueueStorage()
+		members, err := queueStore.ZRangeByScore(ctx, "bsv21", -1e9, 1e9, 0, 1000)
 		if err != nil {
 			log.Fatalf("Failed to query Redis: %v", err)
 		} else if len(members) == 0 {
@@ -83,7 +86,7 @@ func main() {
 			for _, member := range members {
 				wg.Add(1)
 				limiter <- struct{}{}
-				go func(z storage.ScoredMember) {
+				go func(z queue.ScoredMember) {
 					txidStr := z.Member
 					score := z.Score
 					defer func() {
@@ -118,7 +121,7 @@ func main() {
 							// Use the score from the original queue entry
 							// It already contains the block height + index information
 							for tokenId := range tokenIds {
-								if err := eventStorage.ZAdd(ctx, "tok:"+tokenId, storage.ScoredMember{
+								if err := queueStore.ZAdd(ctx, "tok:"+tokenId, queue.ScoredMember{
 									Score:  score,
 									Member: txidStr,
 								}); err != nil {
@@ -126,7 +129,7 @@ func main() {
 								}
 							}
 						}
-						if err := eventStorage.ZRem(ctx, "bsv21", txidStr); err != nil {
+						if err := queueStore.ZRem(ctx, "bsv21", txidStr); err != nil {
 							log.Fatalf("Failed to remove from queue: %v", err)
 						}
 					}

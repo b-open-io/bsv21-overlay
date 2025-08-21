@@ -62,11 +62,14 @@ func main() {
 	storage, err := config.CreateEventStorage(
 		eventsURL, 
 		"", // No BEEF storage needed
-		"", // No pub/sub needed
+		"", // No queue storage needed - will default to ~/.1sat/queue.db
+		"", // No pub/sub needed - will default to channels://
 	)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
+	
+	queueStore := storage.GetQueueStorage()
 
 	ctx := context.Background()
 
@@ -75,7 +78,7 @@ func main() {
 		if tokenID == "" {
 			log.Fatal("Token ID is required for whitelist-add")
 		}
-		err := storage.SAdd(ctx, WhitelistKey, tokenID)
+		err := queueStore.SAdd(ctx, WhitelistKey, tokenID)
 		if err != nil {
 			log.Fatalf("Failed to add token to whitelist: %v", err)
 		}
@@ -85,14 +88,14 @@ func main() {
 		if tokenID == "" {
 			log.Fatal("Token ID is required for whitelist-remove")
 		}
-		err := storage.SRem(ctx, WhitelistKey, tokenID)
+		err := queueStore.SRem(ctx, WhitelistKey, tokenID)
 		if err != nil {
 			log.Fatalf("Failed to remove token from whitelist: %v", err)
 		}
 		fmt.Printf("Removed token %s from whitelist\n", tokenID)
 
 	case "whitelist-list":
-		tokens, err := storage.SMembers(ctx, WhitelistKey)
+		tokens, err := queueStore.SMembers(ctx, WhitelistKey)
 		if err != nil {
 			log.Fatalf("Failed to get whitelist: %v", err)
 		}
@@ -119,7 +122,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to marshal settings: %v", err)
 		}
-		err = storage.HSet(ctx, key, peerURL, string(settingsJSON))
+		err = queueStore.HSet(ctx, key, peerURL, string(settingsJSON))
 		if err != nil {
 			log.Fatalf("Failed to add peer: %v", err)
 		}
@@ -131,7 +134,7 @@ func main() {
 			log.Fatal("Both token ID and peer URL are required for peer-remove")
 		}
 		key := PeerConfigKeyPrefix + tokenID
-		err := storage.HDel(ctx, key, peerURL)
+		err := queueStore.HDel(ctx, key, peerURL)
 		if err != nil {
 			log.Fatalf("Failed to remove peer: %v", err)
 		}
@@ -142,7 +145,7 @@ func main() {
 			log.Fatal("Token ID is required for peer-list")
 		}
 		key := PeerConfigKeyPrefix + tokenID
-		peerData, err := storage.HGetAll(ctx, key)
+		peerData, err := queueStore.HGetAll(ctx, key)
 		if err != nil {
 			log.Fatalf("Failed to get peer config: %v", err)
 		}
@@ -166,7 +169,7 @@ func main() {
 			log.Fatal("Both token ID and peer URL are required for peer-get")
 		}
 		key := PeerConfigKeyPrefix + tokenID
-		settingsJSON, err := storage.HGet(ctx, key, peerURL)
+		settingsJSON, err := queueStore.HGet(ctx, key, peerURL)
 		if err != nil && err.Error() == "redis: nil" {
 			fmt.Printf("Peer %s not found for token %s\n", peerURL, tokenID)
 		} else if err != nil {

@@ -15,6 +15,8 @@ The BSV21 overlay service is a complete solution for working with BSV21 tokens:
 
 - Full BSV21 protocol support with uint64 precision for token amounts
 - Event-based indexing for efficient queries
+- **Dynamic topic management** with funding-based activation
+- **Balance-aware processing** with minimum fee thresholds
 - Support for multiple locking script types:
   - P2PKH (pay-to-public-key-hash)
   - Multisig with cosigners
@@ -543,7 +545,9 @@ The following values are currently hard-coded but can be made configurable:
 | Value | Current | Location | Purpose |
 |-------|---------|----------|---------|
 | Database name | Extracted from URL | MongoDB driver | MongoDB database name (e.g., `/bsv21` in connection string) |
-| Whitelist key | `bsv21:whitelist` | process.go | Redis key for token whitelist |
+| Whitelist key | `bsv21:whitelist` | server.go | Redis key for explicitly whitelisted tokens |
+| Active balances key | `bsv21:active` | server.go | Redis key for tokens with positive balances |
+| Blacklist key | `bsv21:blacklist` | server.go | Redis key for tokens to exclude |
 | Topic prefix | `tok:` | process.go | Redis key prefix for token queues |
 | Concurrency | `16` | process.go | Goroutine pool size |
 | API limit | `1000` | server.go | Maximum results per query |
