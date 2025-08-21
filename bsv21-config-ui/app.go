@@ -54,7 +54,8 @@ func (a *App) GetWhitelistedTokens() ([]string, error) {
 		return nil, fmt.Errorf("Storage not initialized")
 	}
 	
-	members, err := a.storage.GetQueueStorage().SMembers(a.ctx, config.WhitelistKey)
+	queueStore := a.storage.GetQueueStorage()
+	members, err := queueStore.SMembers(a.ctx, config.WhitelistKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get whitelist: %v", err)
 	}
@@ -72,7 +73,8 @@ func (a *App) AddTokenToWhitelist(tokenID string) error {
 		return fmt.Errorf("token ID cannot be empty")
 	}
 	
-	err := a.storage.GetQueueStorage().SAdd(a.ctx, config.WhitelistKey, tokenID)
+	queueStore := a.storage.GetQueueStorage()
+	err := queueStore.SAdd(a.ctx, config.WhitelistKey, tokenID)
 	if err != nil {
 		return fmt.Errorf("failed to add token to whitelist: %v", err)
 	}
@@ -88,7 +90,8 @@ func (a *App) RemoveTokenFromWhitelist(tokenID string) error {
 		return fmt.Errorf("Storage not initialized")
 	}
 	
-	err := a.storage.GetQueueStorage().SRem(a.ctx, config.WhitelistKey, tokenID)
+	queueStore := a.storage.GetQueueStorage()
+	err := queueStore.SRem(a.ctx, config.WhitelistKey, tokenID)
 	if err != nil {
 		return fmt.Errorf("failed to remove token from whitelist: %v", err)
 	}
@@ -106,7 +109,8 @@ func (a *App) GetTopicPeerConfig(tokenID string) (*config.TopicPeerConfig, error
 	}
 	
 	key := config.PeerConfigKeyPrefix + tokenID
-	peerData, err := a.storage.GetQueueStorage().HGetAll(a.ctx, key)
+	queueStore := a.storage.GetQueueStorage()
+	peerData, err := queueStore.HGetAll(a.ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get peer config: %v", err)
 	}
@@ -133,8 +137,10 @@ func (a *App) SetTopicPeerConfig(tokenID string, topicConfig config.TopicPeerCon
 	
 	key := config.PeerConfigKeyPrefix + tokenID
 	
+	queueStore := a.storage.GetQueueStorage()
+	
 	// Get existing config first
-	existingPeers, _ := a.storage.GetQueueStorage().HGetAll(a.ctx, key)
+	existingPeers, _ := queueStore.HGetAll(a.ctx, key)
 	
 	// Remove existing peer configurations
 	if len(existingPeers) > 0 {
@@ -142,7 +148,7 @@ func (a *App) SetTopicPeerConfig(tokenID string, topicConfig config.TopicPeerCon
 		for peerURL := range existingPeers {
 			peerURLs = append(peerURLs, peerURL)
 		}
-		err := a.storage.GetQueueStorage().HDel(a.ctx, key, peerURLs...)
+		err := queueStore.HDel(a.ctx, key, peerURLs...)
 		if err != nil {
 			return fmt.Errorf("failed to clear existing config: %v", err)
 		}
@@ -155,7 +161,7 @@ func (a *App) SetTopicPeerConfig(tokenID string, topicConfig config.TopicPeerCon
 			return fmt.Errorf("failed to marshal settings for peer %s: %v", peerURL, err)
 		}
 		
-		err = a.storage.GetQueueStorage().HSet(a.ctx, key, peerURL, string(settingsJSON))
+		err = queueStore.HSet(a.ctx, key, peerURL, string(settingsJSON))
 		if err != nil {
 			return fmt.Errorf("failed to set peer config for %s: %v", peerURL, err)
 		}
