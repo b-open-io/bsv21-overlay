@@ -33,111 +33,110 @@ The BSV21 overlay service is a complete solution for working with BSV21 tokens:
 ### Prerequisites
 
 - Go 1.21 or higher
-- Redis 7.0+ (or Redis Stack)
-- MongoDB 7.0+ (or compatible)
+- Access to BSV blockchain headers (for SPV validation)
 
-### Installation
+### Installation and Setup
 
 ```bash
 # Clone the repository
 git clone https://github.com/your-org/bsv21-overlay.git
 cd bsv21-overlay
 
-# Build the server
-go build -o server.run cmd/server/server.go
-
-# Or use the build script
+# Build all executables
 ./build.sh
+
+# Set required environment variable
+export HEADERS_URL=
+
+# Whitelist a token you want to track
+./config.run whitelist-add -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+
+# Configure peer synchronization (optional)
+./config.run peer-add -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 -peer=https://bsv21.1sat.app -gasp -sse
+
+# Start the server with sync enabled
+./server.run -p=3000 -s=true
 ```
 
-### Configuration
+That's it! The service now uses intelligent defaults:
+- **Event storage**: Defaults to `~/.1sat/overlay.db` (SQLite)
+- **BEEF storage**: Defaults to `~/.1sat/beef/` (filesystem)  
+- **Queue storage**: Defaults to `~/.1sat/queue.db` (SQLite)
+- **Pub/sub**: Defaults to in-memory channels
 
-The service uses connection strings that auto-detect the storage type:
+### Token Configuration
+
+Before the overlay can process tokens, you need to configure which tokens to track:
+
+#### Add tokens to whitelist
+```bash
+# Add a specific token
+./config.run whitelist-add -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+
+# List all whitelisted tokens
+./config.run whitelist-list
+
+# Remove a token from whitelist
+./config.run whitelist-remove -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+```
+
+#### Configure peer synchronization
+```bash
+# Add peer with GASP and SSE sync enabled
+./config.run peer-add -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 \
+    -peer=https://bsv21.1sat.app -gasp -sse -broadcast
+
+# List peers for a token
+./config.run peer-list -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+
+# Get specific peer settings
+./config.run peer-get -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 \
+    -peer=https://bsv21.1sat.app
+
+# Remove a peer
+./config.run peer-remove -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 \
+    -peer=https://bsv21.1sat.app
+```
+
+### Advanced Configuration (Optional)
+
+For production or specific requirements, you can configure storage backends:
 
 ```bash
-# Event Storage (Required - auto-detects type from URL)
-export EVENTS_URL=mongodb://user:pass@localhost:27017/bsv21?authSource=admin  # MongoDB
-# OR
-export EVENTS_URL=redis://localhost:6379           # Redis
-# OR
-export EVENTS_URL=./overlay.db                     # SQLite (local file)
+# Use MongoDB for events
+export EVENTS_URL=mongodb://user:pass@localhost:27017/bsv21?authSource=admin
 
-# BEEF Storage (Optional - defaults to ./beef_storage/)
-# Single storage backend:
-export BEEF_URL=redis://localhost:6379            # Redis (recommended for production)
-# OR
-export BEEF_URL=mongodb://user:pass@localhost:27017/beef?authSource=admin    # MongoDB
-# OR
-export BEEF_URL=./beef.db                         # SQLite
-# OR leave unset to use ./beef_storage/ directory     # Filesystem (default)
+# Use Redis for BEEF storage  
+export BEEF_URL=redis://localhost:6379
 
-# Hierarchical storage (stack multiple backends):
-export BEEF_URL='["lru://1gb", "redis://localhost:6379", "junglebus://"]'  # JSON array
-# OR
-export BEEF_URL="lru://100mb,redis://localhost:6379,junglebus://"         # Comma-separated
+# Use Redis for queues and pub/sub
+export QUEUE_URL=redis://localhost:6379
+export PUBSUB_URL=redis://localhost:6379
 
-# Redis Configuration (Required for queue operations and pub/sub)
-export REDIS_URL=redis://localhost:6379              # Redis for pub/sub and queue operations
-
-# Service Configuration
+# Service configuration
 export PORT=3000
 export HOSTING_URL=http://localhost:3000
-
-# Block Headers Service (for SPV validation)
-export HEADERS_URL=https://api.whatsonchain.com/v1/bsv/main/block
-export HEADERS_KEY=your_api_key
-
-# Optional: Peer sync for horizontal scaling
-export PEERS=http://peer1:3000,http://peer2:3000
-
-# Optional: ARC Integration
-export ARC_API_KEY=your_arc_api_key
-export ARC_CALLBACK_TOKEN=your_callback_token
 ```
-
-#### Common Configuration Examples
-
-**Development (minimal setup):**
-```bash
-export REDIS_URL=redis://localhost:6379
-# EVENTS_URL defaults to ./overlay.db
-# BEEF_URL defaults to ./beef_storage/
-```
-
-**Production (high performance):**
-```bash
-export EVENTS_URL=mongodb://user:pass@localhost:27017/bsv21?authSource=admin
-export BEEF_URL=redis://localhost:6379
-export REDIS_URL=redis://localhost:6379
-```
-
-**All Redis:**
-```bash
-export EVENTS_URL=redis://localhost:6379
-export BEEF_URL=redis://localhost:6379
-export REDIS_URL=redis://localhost:6379
-```
-
-For development convenience, you can create a `.env` file in the project root with these variables (without the `export` prefix), which will be automatically loaded when running from the source directory.
 
 ### Running the Service
 
 ```bash
-# Start the BSV21 overlay server
+# Start with defaults (minimal setup)
 ./server.run
 
-# Or with custom port
-./server.run -p 8080
+# Start with sync enabled
+./server.run -s=true
 
-# Or run with environment variables set inline
-EVENTS_URL=mongodb://user:pass@mongo-host:27017/bsv21?authSource=admin BEEF_URL=redis://redis-host:6379 ./server.run
+# Start with custom port and sync
+./server.run -p=8080 -s=true
+
+# Start with LibP2P sync
+./server.run -s=true -p2p=true
 ```
 
-The server will start on port 3000 by default. You can now:
+Once running, you can:
 - Submit transactions to `/submit`
-- Query event history at `/api/1sat/events/:topic/:event/history`
-- Query unspent events at `/api/1sat/events/:topic/:event/unspent`
-- Check balances at `/api/1sat/bsv21/:tokenId/:lockType/:address/balance`
+- Query token balances at `/api/1sat/bsv21/:tokenId/:lockType/:address/balance`
 - Get transaction history at `/api/1sat/bsv21/:tokenId/:lockType/:address/history`
 - Subscribe to real-time updates at `/api/1sat/subscribe/:events`
 
