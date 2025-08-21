@@ -466,7 +466,7 @@ func main() {
 	app.Use(logger.New())
 
 	// Setup OpenAPI documentation
-	// TODO: setupOpenAPIDocumentation(app)
+	setupOpenAPIDocumentation(app)
 
 	onesat := app.Group("/api/1sat")
 
