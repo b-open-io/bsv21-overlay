@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/topics"
@@ -157,7 +158,6 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 				store,
 				[]string{tokenId},
 			)
-			log.Printf("Created topic manager: %s", topicName)
 		}
 		
 		// Configure GASP sync peers for this topic
@@ -439,6 +439,25 @@ func main() {
 		}()
 	}
 
+	// Start periodic topic registration updates
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		
+		log.Println("Starting periodic topic registration updates...")
+		
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Topic registration updater shutting down...")
+				return
+			case <-ticker.C:
+				if err := RegisterTopics(ctx, e, store, peerTopics); err != nil {
+					log.Printf("Failed to update topic registration: %v", err)
+				}
+			}
+		}
+	}()
 
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
