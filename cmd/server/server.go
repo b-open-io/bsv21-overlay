@@ -293,7 +293,7 @@ func main() {
 				return
 			case <-ticker.C:
 				if err := peer.RegisterTopics(ctx, e, store, peerTopics); err != nil {
-					log.Printf("Failed to update topic registration: %v", err)
+					log.Panicf("Failed to update topic registration: %v", err)
 				}
 			}
 		}
@@ -350,6 +350,7 @@ func main() {
 		log.Printf("Starting server on port %d...", PORT)
 		if err := app.Listen(fmt.Sprintf(":%d", PORT)); err != nil {
 			log.Printf("Server error: %v", err)
+			cancel()
 		}
 	}()
 

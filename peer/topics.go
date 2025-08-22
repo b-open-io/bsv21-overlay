@@ -6,7 +6,6 @@ import (
 
 	"github.com/b-open-io/bsv21-overlay/constants"
 	"github.com/b-open-io/bsv21-overlay/topics"
-	"github.com/b-open-io/overlay/queue"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 )
@@ -27,14 +26,14 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 	whitelistTokens, err := queueStore.SMembers(ctx, constants.KeyWhitelist)
 	if err != nil {
 		log.Printf("Failed to get whitelist: %v", err)
-		whitelistTokens = []string{}
+		return err
 	}
 
 	// Get active balance tokens
 	activeBalances, err := queueStore.ZRangeByScore(ctx, constants.KeyActive, 1, 1e9, 0, 0) // Only positive balances
 	if err != nil {
 		log.Printf("Failed to get active balances: %v", err)
-		activeBalances = []queue.ScoredMember{}
+		return err
 	}
 
 	// Build new managers map
