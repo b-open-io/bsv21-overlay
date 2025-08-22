@@ -229,7 +229,6 @@ paths:
           schema:
             type: string
           description: Token ID (outpoint string) to query
-          example: "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"
       responses:
         '200':
           description: Successful response
@@ -290,14 +289,12 @@ paths:
           schema:
             type: string
           description: Token ID to query
-          example: "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0"
         - name: txid
           in: path
           required: true
           schema:
             type: string
           description: Transaction ID to query
-          example: "def456789abc123456789def456789abc123456789def456789abc123456789def"
         - name: beef
           in: query
           required: false
