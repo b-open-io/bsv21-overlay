@@ -5,6 +5,7 @@ go 1.24.3
 toolchain go1.24.6
 
 require (
+	github.com/b-open-io/bsv21-overlay v0.0.0-20250822193938-0bbe3301250d
 	github.com/b-open-io/overlay v0.2.1
 	github.com/joho/godotenv v1.5.1
 	github.com/wailsapp/wails/v2 v2.10.2
