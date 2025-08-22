@@ -10,16 +10,28 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction"
 )
 
+// SyncMode defines how the topic manager handles missing inputs during processing
+type SyncMode int
+
+const (
+	// SyncModeFull assumes all inputs are already in overlay, missing inputs don't exist (GASP sync)
+	SyncModeFull SyncMode = iota
+	// SyncModeAdhoc processes transactions as encountered, missing inputs may arrive later (SSE/LibP2P/submit)
+	SyncModeAdhoc
+)
+
 type Bsv21ValidatedTopicManager struct {
 	topic    string
 	storage  engine.Storage
 	tokenIds map[string]struct{}
+	syncMode SyncMode
 }
 
-func NewBsv21ValidatedTopicManager(topic string, storage engine.Storage, tokenIds []string) (tm *Bsv21ValidatedTopicManager) {
+func NewBsv21ValidatedTopicManager(topic string, storage engine.Storage, tokenIds []string, syncMode SyncMode) (tm *Bsv21ValidatedTopicManager) {
 	tm = &Bsv21ValidatedTopicManager{
-		topic:   topic,
-		storage: storage,
+		topic:    topic,
+		storage:  storage,
+		syncMode: syncMode,
 	}
 	if len(tokenIds) > 0 {
 		tm.tokenIds = make(map[string]struct{}, len(tokenIds))
@@ -121,7 +133,10 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 							b.Id = outpoint.OrdinalString()
 						}
 						if tm.HasTokenId(b.Id) {
-							return admit, engine.ErrMissingInput
+							if tm.syncMode == SyncModeAdhoc {
+								return admit, engine.ErrMissingInput
+							}
+							// In full sync mode, missing inputs don't exist - continue processing
 						}
 					}
 				}

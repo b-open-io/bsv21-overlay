@@ -64,6 +64,7 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 				topic,
 				store,
 				[]string{tokenId},
+				topics.SyncModeAdhoc,
 			)
 		}
 
@@ -108,6 +109,7 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 				topic,
 				store,
 				[]string{tokenId},
+				topics.SyncModeAdhoc,
 			)
 			log.Printf("Created topic manager for active token: %s (balance: %.0f)", topic, scoreItem.Score)
 		}
