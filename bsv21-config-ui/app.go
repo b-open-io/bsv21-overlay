@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/b-open-io/bsv21-overlay/constants"
 	overlayConfig "github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/joho/godotenv"
@@ -55,7 +56,7 @@ func (a *App) GetWhitelistedTokens() ([]string, error) {
 	}
 	
 	queueStore := a.storage.GetQueueStorage()
-	members, err := queueStore.SMembers(a.ctx, config.WhitelistKey)
+	members, err := queueStore.SMembers(a.ctx, constants.KeyWhitelist)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get whitelist: %v", err)
 	}
@@ -74,7 +75,7 @@ func (a *App) AddTokenToWhitelist(tokenID string) error {
 	}
 	
 	queueStore := a.storage.GetQueueStorage()
-	err := queueStore.SAdd(a.ctx, config.WhitelistKey, tokenID)
+	err := queueStore.SAdd(a.ctx, constants.KeyWhitelist, tokenID)
 	if err != nil {
 		return fmt.Errorf("failed to add token to whitelist: %v", err)
 	}
@@ -91,7 +92,7 @@ func (a *App) RemoveTokenFromWhitelist(tokenID string) error {
 	}
 	
 	queueStore := a.storage.GetQueueStorage()
-	err := queueStore.SRem(a.ctx, config.WhitelistKey, tokenID)
+	err := queueStore.SRem(a.ctx, constants.KeyWhitelist, tokenID)
 	if err != nil {
 		return fmt.Errorf("failed to remove token from whitelist: %v", err)
 	}
@@ -108,7 +109,7 @@ func (a *App) GetTopicPeerConfig(tokenID string) (*config.TopicPeerConfig, error
 		return nil, fmt.Errorf("Storage not initialized")
 	}
 	
-	key := config.PeerConfigKeyPrefix + tokenID
+	key := constants.PeerConfigKeyPrefix + tokenID
 	queueStore := a.storage.GetQueueStorage()
 	peerData, err := queueStore.HGetAll(a.ctx, key)
 	if err != nil {
@@ -135,7 +136,7 @@ func (a *App) SetTopicPeerConfig(tokenID string, topicConfig config.TopicPeerCon
 		return fmt.Errorf("Storage not initialized")
 	}
 	
-	key := config.PeerConfigKeyPrefix + tokenID
+	key := constants.PeerConfigKeyPrefix + tokenID
 	
 	queueStore := a.storage.GetQueueStorage()
 	

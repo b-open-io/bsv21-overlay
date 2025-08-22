@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 
+	"github.com/b-open-io/bsv21-overlay/constants"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/queue"
 	"github.com/b-open-io/overlay/storage"
@@ -16,21 +17,21 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 
 	// Load blacklist once for fast O(1) lookups
 	blacklist := make(map[string]struct{})
-	if blacklisted, err := queueStore.SMembers(ctx, "bsv21:blacklist"); err == nil {
+	if blacklisted, err := queueStore.SMembers(ctx, constants.KeyBlacklist); err == nil {
 		for _, token := range blacklisted {
 			blacklist[token] = struct{}{}
 		}
 	}
 
 	// Get whitelist tokens
-	whitelistTokens, err := queueStore.SMembers(ctx, "bsv21:whitelist")
+	whitelistTokens, err := queueStore.SMembers(ctx, constants.KeyWhitelist)
 	if err != nil {
 		log.Printf("Failed to get whitelist: %v", err)
 		whitelistTokens = []string{}
 	}
 
 	// Get active balance tokens
-	activeBalances, err := queueStore.ZRangeByScore(ctx, "bsv21:active", 1, 1e9, 0, 0) // Only positive balances
+	activeBalances, err := queueStore.ZRangeByScore(ctx, constants.KeyActive, 1, 1e9, 0, 0) // Only positive balances
 	if err != nil {
 		log.Printf("Failed to get active balances: %v", err)
 		activeBalances = []queue.ScoredMember{}

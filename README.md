@@ -547,8 +547,6 @@ The following values are currently hard-coded but can be made configurable:
 | Whitelist key | `bsv21:whitelist` | server.go | Redis key for explicitly whitelisted tokens |
 | Active balances key | `bsv21:active` | server.go | Redis key for tokens with positive balances |
 | Blacklist key | `bsv21:blacklist` | server.go | Redis key for tokens to exclude |
-| Topic prefix | `tok:` | process.go | Redis key prefix for token queues |
-| Concurrency | `16` | process.go | Goroutine pool size |
 | API limit | `1000` | server.go | Maximum results per query |
 | Default database | `overlay` | storage/mongo.go | Default MongoDB database if not in URL |
 | Default BEEF path | `./beef_storage/` | beef/factory.go | Default filesystem storage for BEEF |

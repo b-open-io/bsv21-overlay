@@ -8,14 +8,12 @@ import (
 	"log"
 	"os"
 
+	"github.com/b-open-io/bsv21-overlay/constants"
 	"github.com/b-open-io/overlay/config"
 	"github.com/joho/godotenv"
 )
 
-const (
-	WhitelistKey        = "bsv21:whitelist"
-	PeerConfigKeyPrefix = "peers:tm_"
-)
+// Note: Storage key constants are now defined in constants/keys.go
 
 type PeerSettings struct {
 	SSE       bool `json:"sse"`
@@ -78,7 +76,7 @@ func main() {
 		if tokenID == "" {
 			log.Fatal("Token ID is required for whitelist-add")
 		}
-		err := queueStore.SAdd(ctx, WhitelistKey, tokenID)
+		err := queueStore.SAdd(ctx, constants.KeyWhitelist, tokenID)
 		if err != nil {
 			log.Fatalf("Failed to add token to whitelist: %v", err)
 		}
@@ -88,14 +86,14 @@ func main() {
 		if tokenID == "" {
 			log.Fatal("Token ID is required for whitelist-remove")
 		}
-		err := queueStore.SRem(ctx, WhitelistKey, tokenID)
+		err := queueStore.SRem(ctx, constants.KeyWhitelist, tokenID)
 		if err != nil {
 			log.Fatalf("Failed to remove token from whitelist: %v", err)
 		}
 		fmt.Printf("Removed token %s from whitelist\n", tokenID)
 
 	case "whitelist-list":
-		tokens, err := queueStore.SMembers(ctx, WhitelistKey)
+		tokens, err := queueStore.SMembers(ctx, constants.KeyWhitelist)
 		if err != nil {
 			log.Fatalf("Failed to get whitelist: %v", err)
 		}
@@ -112,7 +110,7 @@ func main() {
 		if tokenID == "" || peerURL == "" {
 			log.Fatal("Both token ID and peer URL are required for peer-add")
 		}
-		key := PeerConfigKeyPrefix + tokenID
+		key := constants.PeerConfigKeyPrefix + tokenID
 		settings := PeerSettings{
 			SSE:       sseFlag,
 			GASP:      gaspFlag,
@@ -133,7 +131,7 @@ func main() {
 		if tokenID == "" || peerURL == "" {
 			log.Fatal("Both token ID and peer URL are required for peer-remove")
 		}
-		key := PeerConfigKeyPrefix + tokenID
+		key := constants.PeerConfigKeyPrefix + tokenID
 		err := queueStore.HDel(ctx, key, peerURL)
 		if err != nil {
 			log.Fatalf("Failed to remove peer: %v", err)
@@ -144,7 +142,7 @@ func main() {
 		if tokenID == "" {
 			log.Fatal("Token ID is required for peer-list")
 		}
-		key := PeerConfigKeyPrefix + tokenID
+		key := constants.PeerConfigKeyPrefix + tokenID
 		peerData, err := queueStore.HGetAll(ctx, key)
 		if err != nil {
 			log.Fatalf("Failed to get peer config: %v", err)
@@ -168,7 +166,7 @@ func main() {
 		if tokenID == "" || peerURL == "" {
 			log.Fatal("Both token ID and peer URL are required for peer-get")
 		}
-		key := PeerConfigKeyPrefix + tokenID
+		key := constants.PeerConfigKeyPrefix + tokenID
 		settingsJSON, err := queueStore.HGet(ctx, key, peerURL)
 		if err != nil && err.Error() == "redis: nil" {
 			fmt.Printf("Peer %s not found for token %s\n", peerURL, tokenID)

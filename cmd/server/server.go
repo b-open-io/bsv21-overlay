@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/b-open-io/bsv21-overlay/constants"
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/peer"
 	bsv21routes "github.com/b-open-io/bsv21-overlay/routes"
@@ -212,7 +213,7 @@ func main() {
 
 			// Get whitelist tokens for SSE configuration
 			queueStore := store.GetQueueStorage()
-			whitelistTokens, sseErr := queueStore.SMembers(ctx, "bsv21:whitelist")
+			whitelistTokens, sseErr := queueStore.SMembers(ctx, constants.KeyWhitelist)
 			if sseErr != nil {
 				log.Printf("Failed to get whitelist for SSE sync: %v", sseErr)
 				return
@@ -250,7 +251,7 @@ func main() {
 
 			// Build topic list for LibP2P sync (whitelist only)
 			queueStore := store.GetQueueStorage()
-			whitelistTokens, libp2pErr := queueStore.SMembers(ctx, "bsv21:whitelist")
+			whitelistTokens, libp2pErr := queueStore.SMembers(ctx, constants.KeyWhitelist)
 			if libp2pErr != nil {
 				log.Printf("Failed to get whitelist for LibP2P sync: %v", libp2pErr)
 				return

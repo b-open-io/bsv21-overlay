@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/b-open-io/bsv21-overlay/constants"
 	"github.com/b-open-io/overlay/storage"
 )
 
 // LoadConfigFromStorage reads peer configuration from storage for a given token
 func LoadConfigFromStorage(ctx context.Context, store storage.EventDataStorage, tokenId string) (map[string]PeerSettings, error) {
 	queueStore := store.GetQueueStorage()
-	key := ConfigKeyPrefix + tokenId
+	key := constants.PeerConfigKeyPrefix + tokenId
 	peerData, err := queueStore.HGetAll(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get peer config for token %s: %v", tokenId, err)

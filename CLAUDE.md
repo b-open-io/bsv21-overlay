@@ -10,12 +10,10 @@ The service is built on a **unified storage interface** that abstracts away back
 
 ## Architecture
 
-The service consists of 4 main executables that work together:
+The service consists of 2 main executables:
 
-1. **sub.run** - JungleBus subscriber that listens for BSV-21 transactions
-2. **queue.run** - Processes incoming transactions and queues them by token ID
-3. **process.run** - Validates transactions and updates token state
-4. **server.run** - HTTP API server providing lookup and streaming endpoints
+1. **server.run** - HTTP API server providing lookup, streaming endpoints, and integrated transaction processing
+2. **config.run** - Configuration management CLI for whitelists and peer settings
 
 ### Unified Storage Architecture
 
@@ -38,9 +36,9 @@ The core innovation is the **EventDataStorage** interface that provides Redis-st
 
 ### Data Flow
 ```
-JungleBus → sub → Redis Queue → queue → Token Queues → process → Unified Storage
-                                                                      ↓
-Clients ← server ← Event Storage (Redis/MongoDB/SQLite via unified interface)
+External Data Sources → server.run → Unified Storage Interface
+                                            ↓
+Clients ← HTTP API ← Event Storage (Redis/MongoDB/SQLite)
 ```
 
 ## Build Commands
@@ -50,10 +48,8 @@ Clients ← server ← Event Storage (Redis/MongoDB/SQLite via unified interface
 ./build.sh
 
 # Or build individually:
-go build -o sub.run cmd/sub/sub.go
-go build -o queue.run cmd/queue/queue.go
-go build -o process.run cmd/process/process.go
-go build -o server.run cmd/server/server.go
+go build -o server.run ./cmd/server/
+go build -o config.run cmd/config/config.go
 
 # Run tests
 go test ./...
@@ -64,19 +60,17 @@ go test ./sandbox -run TestName
 
 ## Running the Services
 
-Services should be started in this order:
+Start the main API server:
 ```bash
-# 1. Start subscription service
-./sub.run
-
-# 2. Start queue processor
-./queue.run
-
-# 3. Start token processor
-./process.run
-
-# 4. Start API server
+# Start the API server with integrated processing
 ./server.run
+```
+
+The config utility can be run as needed:
+```bash
+# Manage token whitelist and peer configurations
+./config.run whitelist-add -token your_token_id
+./config.run peer-add -token your_token_id -peer https://peer.example.com
 ```
 
 ## Configuration
