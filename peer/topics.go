@@ -10,7 +10,7 @@ import (
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 )
 
-// RegisterTopics manages topic managers and peer configurations dynamically
+// RegisterTopics manages topic managers dynamically based on whitelist, blacklist, and active tokens
 func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.EventDataStorage, peerTopics map[string][]string) error {
 	queueStore := store.GetQueueStorage()
 
@@ -39,11 +39,6 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 	// Build new managers map
 	newManagers := make(map[string]engine.TopicManager)
 
-	// Clear and rebuild peer topics map
-	for k := range peerTopics {
-		delete(peerTopics, k)
-	}
-
 	whitelistCount := 0
 	activeCount := 0
 
@@ -68,20 +63,7 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 			)
 		}
 
-		// Configure GASP sync peers for this topic
-		if gaspPeers, err := GetPeersWithSetting(ctx, store, tokenId, "gasp"); err == nil && len(gaspPeers) > 0 {
-			eng.SyncConfiguration[topic] = engine.SyncConfiguration{
-				Type:  engine.SyncConfigurationPeers,
-				Peers: gaspPeers,
-			}
-		}
-
-		// Configure broadcast peers for this topic
-		if broadcastPeers, err := GetPeersWithSetting(ctx, store, tokenId, "broadcast"); err == nil && len(broadcastPeers) > 0 {
-			for _, peer := range broadcastPeers {
-				peerTopics[peer] = append(peerTopics[peer], topic)
-			}
-		}
+		// Peer configuration is now handled by config.ConfigureSync and config.GetBroadcastPeerTopics
 
 		whitelistCount++
 	}
@@ -120,8 +102,8 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.Event
 	// Replace engine managers with new map
 	eng.Managers = newManagers
 
-	log.Printf("Registered %d topic managers (%d whitelist + %d active, %d blacklisted), %d broadcast peers",
-		len(newManagers), whitelistCount, activeCount, len(blacklist), len(peerTopics))
+	log.Printf("Registered %d topic managers (%d whitelist + %d active, %d blacklisted)",
+		len(newManagers), whitelistCount, activeCount, len(blacklist))
 
 	return nil
 }

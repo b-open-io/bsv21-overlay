@@ -85,6 +85,9 @@ func init() {
 	if arcURL == "" {
 		arcURL = "https://arc.gorillapool.io"
 	}
+	if headersURL == "" {
+		headersURL = "https://mainnet.headers.gorillapool.io"
+	}
 
 	// Set up chain tracker
 	chaintracker = &headers_client.Client{
@@ -180,18 +183,30 @@ func main() {
 		ChainTracker:      chaintracker,
 	}
 
-	// Initialize peer topics map
-	peerTopics := make(map[string][]string)
-
-	// Register topic managers for active and whitelisted tokens (populates peerTopics)
-	if err := peer.RegisterTopics(ctx, e, store, peerTopics); err != nil {
+	// Register topic managers for active and whitelisted tokens
+	if err := peer.RegisterTopics(ctx, e, store, nil); err != nil {
 		log.Fatalf("Failed to register topics: %v", err)
 	}
 
-	// Setup peer broadcasting for transaction submission
-	// peerTopics map is already populated by RegisterTopics
+	// Build topic ID list from registered managers
+	topicIds := make([]string, 0, len(e.Managers))
+	for topicId := range e.Managers {
+		topicIds = append(topicIds, topicId)
+	}
 
-	// Create peer broadcaster (always create, works with empty map)
+	// Configure sync settings for all topics using storage-based peer configuration
+	if err := config.ConfigureSync(ctx, e, store.GetQueueStorage(), topicIds); err != nil {
+		log.Printf("Failed to configure sync: %v", err)
+	}
+
+	// Get broadcast peer mapping for transaction submission
+	peerTopics, err := config.GetBroadcastPeerTopics(ctx, store.GetQueueStorage(), topicIds)
+	if err != nil {
+		log.Printf("Failed to get broadcast peer mapping: %v", err)
+		peerTopics = make(map[string][]string) // Fallback to empty map
+	}
+
+	// Create peer broadcaster
 	peerBroadcaster = pubsub.NewPeerBroadcaster(peerTopics)
 	log.Printf("Configured peer broadcaster with %d peers", len(peerTopics))
 
@@ -208,26 +223,11 @@ func main() {
 		go func() {
 			log.Println("Starting SSE sync...")
 
-			// Build peer-to-topics mapping from storage configuration (whitelist only)
-			ssePeerTopics := make(map[string][]string)
-
-			// Get whitelist tokens for SSE configuration
-			queueStore := store.GetQueueStorage()
-			whitelistTokens, sseErr := queueStore.SMembers(ctx, constants.KeyWhitelist)
+			// Get SSE peer mapping using the abstracted config
+			ssePeerTopics, sseErr := config.GetSSEPeerTopics(ctx, store, topicIds)
 			if sseErr != nil {
-				log.Printf("Failed to get whitelist for SSE sync: %v", sseErr)
+				log.Printf("Failed to get SSE peer mapping: %v", sseErr)
 				return
-			}
-
-			for _, tokenId := range whitelistTokens {
-				topic := "tm_" + tokenId
-				if peers, err := peer.GetPeersWithSetting(ctx, store, tokenId, "sse"); err == nil && len(peers) > 0 {
-					// Build reverse mapping: peer -> topics (only for peers with SSE enabled)
-					for _, peer := range peers {
-						ssePeerTopics[peer] = append(ssePeerTopics[peer], topic)
-					}
-					log.Printf("Loaded SSE configuration for topic %s with %d peers", topic, len(peers))
-				}
 			}
 
 			// Register SSE sync

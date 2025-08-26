@@ -33,7 +33,9 @@ The BSV21 overlay service is a complete solution for working with BSV21 tokens:
 ### Prerequisites
 
 - Go 1.21 or higher
-- Access to BSV blockchain headers (for SPV validation)
+- **Block Headers Service**: For SPV validation, you need access to a BSV block headers service
+  - Set up your own using [block-headers-service](https://github.com/bsv-blockchain/block-headers-service)
+  - Configure via `HEADERS_URL` and `HEADERS_KEY` environment variables
 
 ### Installation and Setup
 
@@ -431,7 +433,7 @@ Most endpoints return `OutputData` objects with the following structure:
 - `vout` - Output index within the transaction
 - `script` - Locking script (hex encoded)
 - `satoshis` - Bitcoin satoshi value
-- `score` - Sort score for pagination (blockHeight + blockIndex/1e9)
+- `score` - Sort score for pagination (timestamp-based)
 - `spend` - Spending transaction ID (null if unspent)
 - `data` - Protocol-specific data (BSV21 token information)
 

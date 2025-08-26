@@ -34,21 +34,6 @@ func NewBsv21EventsLookup(eventStorage storage.EventDataStorage) (*Bsv21EventsLo
 }
 
 func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *engine.OutputAdmittedByTopic) error {
-	blockHeight := uint32(time.Now().Unix())
-	var blockIdx uint64
-	_, tx, txid, err := transaction.ParseBeef(payload.AtomicBEEF)
-	if err != nil {
-		return err
-	}
-	if tx.MerklePath != nil {
-		blockHeight = tx.MerklePath.BlockHeight
-		for _, pe := range tx.MerklePath.Path[0] {
-			if pe.Hash.Equal(*txid) {
-				blockIdx = pe.Offset
-				break
-			}
-		}
-	}
 
 	// Decode the BSV21 data using the go-templates parser
 	if b := bsv21.Decode(payload.LockingScript); b != nil {
@@ -136,7 +121,8 @@ func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *
 		}
 
 		// Save all events with the data using the storage layer
-		if err := l.storage.SaveEvents(ctx, payload.Outpoint, events, payload.Topic, blockHeight, blockIdx, dataToStore); err != nil {
+		score := float64(time.Now().UnixNano())
+		if err := l.storage.SaveEvents(ctx, payload.Outpoint, events, payload.Topic, score, dataToStore); err != nil {
 			return err
 		}
 	}
