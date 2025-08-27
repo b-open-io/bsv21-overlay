@@ -18,7 +18,7 @@ import (
 
 // BSV21RoutesConfig holds the configuration for BSV21-specific routes
 type BSV21RoutesConfig struct {
-	Storage      storage.EventDataStorage
+	Storage      *storage.EventDataStorage
 	ChainTracker *headers_client.Client
 	Engine       *engine.Engine
 	BSV21Lookup  *lookups.Bsv21EventsLookup

@@ -11,7 +11,7 @@ import (
 )
 
 // RegisterTopics manages topic managers dynamically based on whitelist, blacklist, and active tokens
-func RegisterTopics(ctx context.Context, eng *engine.Engine, store storage.EventDataStorage, peerTopics map[string][]string) error {
+func RegisterTopics(ctx context.Context, eng *engine.Engine, store *storage.EventDataStorage, peerTopics map[string][]string) error {
 	queueStore := store.GetQueueStorage()
 
 	// Load blacklist once for fast O(1) lookups

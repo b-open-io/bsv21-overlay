@@ -163,46 +163,46 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 }
 
 func (tm *Bsv21ValidatedTopicManager) IdentifyNeededInputs(ctx context.Context, beefBytes []byte) ([]*transaction.Outpoint, error) {
-	// beef, tx, _, err := transaction.ParseBeef(beefBytes)
-	// if err != nil {
-	// 	return nil, err
-	// } else if tx == nil {
-	// 	return nil, engine.ErrInvalidBeef
-	// }
+	beef, tx, _, err := transaction.ParseBeef(beefBytes)
+	if err != nil {
+		return nil, err
+	} else if tx == nil {
+		return nil, engine.ErrInvalidBeef
+	}
 
-	// tokens := make(map[string]struct{})
-	// for _, output := range tx.Outputs {
-	// 	if b := bsv21.Decode(output.LockingScript); b != nil {
-	// 		if !tm.HasTokenId(b.Id) {
-	// 			continue
-	// 		}
-	// 		tokens[b.Id] = struct{}{}
-	// 	}
-	// }
+	tokens := make(map[string]struct{})
+	for _, output := range tx.Outputs {
+		if b := bsv21.Decode(output.LockingScript); b != nil {
+			if !tm.HasTokenId(b.Id) {
+				continue
+			}
+			tokens[b.Id] = struct{}{}
+		}
+	}
 
-	// if len(tokens) == 0 {
-	// 	return nil, nil
-	// }
-	// var inputs []*transaction.Outpoint
-	// for _, txin := range tx.Inputs {
-	// 	if inTx := beef.FindTransaction(txin.SourceTXID.String()); inTx != nil {
-	// 		outpoint := &transaction.Outpoint{
-	// 			Txid:  *txin.SourceTXID,
-	// 			Index: txin.SourceTxOutIndex,
-	// 		}
-	// 		script := inTx.Outputs[txin.SourceTxOutIndex].LockingScript
-	// 		if b := bsv21.Decode(script); b != nil {
-	// 			if b.Op == string(bsv21.OpMint) {
-	// 				b.Id = (outpoint).OrdinalString()
-	// 			}
-	// 			if !tm.HasTokenId(b.Id) {
-	// 				continue
-	// 			}
-	// 			inputs = append(inputs, outpoint)
-	// 		}
-	// 	}
-	// }
-	return []*transaction.Outpoint{}, nil
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+	var inputs []*transaction.Outpoint
+	for _, txin := range tx.Inputs {
+		if inTx := beef.FindTransaction(txin.SourceTXID.String()); inTx != nil {
+			outpoint := &transaction.Outpoint{
+				Txid:  *txin.SourceTXID,
+				Index: txin.SourceTxOutIndex,
+			}
+			script := inTx.Outputs[txin.SourceTxOutIndex].LockingScript
+			if b := bsv21.Decode(script); b != nil {
+				if b.Op == string(bsv21.OpMint) {
+					b.Id = (outpoint).OrdinalString()
+				}
+				if _, exists := tokens[b.Id]; !exists {
+					continue
+				}
+				inputs = append(inputs, outpoint)
+			}
+		}
+	}
+	return inputs, nil
 }
 
 func (tm *Bsv21ValidatedTopicManager) GetDocumentation() string {

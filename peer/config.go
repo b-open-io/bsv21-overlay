@@ -11,7 +11,7 @@ import (
 )
 
 // LoadConfigFromStorage reads peer configuration from storage for a given token
-func LoadConfigFromStorage(ctx context.Context, store storage.EventDataStorage, tokenId string) (map[string]PeerSettings, error) {
+func LoadConfigFromStorage(ctx context.Context, store *storage.EventDataStorage, tokenId string) (map[string]PeerSettings, error) {
 	queueStore := store.GetQueueStorage()
 	key := constants.PeerConfigKeyPrefix + tokenId
 	peerData, err := queueStore.HGetAll(ctx, key)
@@ -33,7 +33,7 @@ func LoadConfigFromStorage(ctx context.Context, store storage.EventDataStorage, 
 }
 
 // GetPeersWithSetting returns peers that have a specific setting enabled for a token
-func GetPeersWithSetting(ctx context.Context, store storage.EventDataStorage, tokenId string, settingName string) ([]string, error) {
+func GetPeersWithSetting(ctx context.Context, store *storage.EventDataStorage, tokenId string, settingName string) ([]string, error) {
 	peerConfig, err := LoadConfigFromStorage(ctx, store, tokenId)
 	if err != nil {
 		return nil, err

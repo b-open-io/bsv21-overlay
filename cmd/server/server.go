@@ -15,6 +15,7 @@ import (
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/peer"
 	bsv21routes "github.com/b-open-io/bsv21-overlay/routes"
+	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/pubsub"
 	"github.com/b-open-io/overlay/routes"
@@ -112,7 +113,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize variables for cleanup
-	var store storage.EventDataStorage
+	var store *storage.EventDataStorage
 	var bsv21Lookup *lookups.Bsv21EventsLookup
 
 	// Setup cleanup function
@@ -214,7 +215,33 @@ func main() {
 	if SYNC {
 		go func() {
 			log.Println("Starting GASP sync...")
-			if err := e.StartGASPSync(ctx); err != nil {
+			
+			// Create separate engine for GASP sync with SyncModeFull topic managers
+			gaspEngine := &engine.Engine{
+				Managers:          map[string]engine.TopicManager{},
+				LookupServices:    e.LookupServices,    // Share lookup services
+				SyncConfiguration: e.SyncConfiguration, // Share sync configuration
+				Broadcaster:       e.Broadcaster,       // Share broadcaster
+				HostingURL:        e.HostingURL,        // Share hosting URL
+				Storage:           e.Storage,           // Share storage
+				ChainTracker:      e.ChainTracker,      // Share chain tracker
+			}
+			
+			// Create SyncModeFull topic managers for the same topics as main engine
+			for topicId := range e.Managers {
+				// Extract tokenId from topic (remove "tm_" prefix)
+				tokenId := topicId[3:]
+				gaspEngine.Managers[topicId] = topics.NewBsv21ValidatedTopicManager(
+					topicId,
+					store,
+					[]string{tokenId},
+					topics.SyncModeFull,
+				)
+			}
+			
+			log.Printf("Created GASP engine with %d SyncModeFull topic managers", len(gaspEngine.Managers))
+			
+			if err := gaspEngine.StartGASPSync(ctx); err != nil {
 				log.Printf("Error starting GASP sync: %v", err)
 			}
 		}()
@@ -224,7 +251,7 @@ func main() {
 			log.Println("Starting SSE sync...")
 
 			// Get SSE peer mapping using the abstracted config
-			ssePeerTopics, sseErr := config.GetSSEPeerTopics(ctx, store, topicIds)
+			ssePeerTopics, sseErr := config.GetSSEPeerTopics(ctx, store.GetQueueStorage(), topicIds)
 			if sseErr != nil {
 				log.Printf("Failed to get SSE peer mapping: %v", sseErr)
 				return

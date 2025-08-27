@@ -17,7 +17,7 @@ import (
 // App struct
 type App struct {
 	ctx     context.Context
-	storage storage.EventDataStorage
+	storage *storage.EventDataStorage
 }
 
 // NewApp creates a new App application struct

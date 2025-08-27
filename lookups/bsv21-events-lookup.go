@@ -23,11 +23,11 @@ import (
 )
 
 type Bsv21EventsLookup struct {
-	storage   storage.EventDataStorage
+	storage   *storage.EventDataStorage
 	mintCache sync.Map // Cache of mint tokens by tokenId (stores *bsv21.Bsv21)
 }
 
-func NewBsv21EventsLookup(eventStorage storage.EventDataStorage) (*Bsv21EventsLookup, error) {
+func NewBsv21EventsLookup(eventStorage *storage.EventDataStorage) (*Bsv21EventsLookup, error) {
 	return &Bsv21EventsLookup{
 		storage: eventStorage,
 	}, nil
@@ -242,7 +242,8 @@ func (l *Bsv21EventsLookup) GetToken(ctx context.Context, outpoint *transaction.
 	}
 
 	// Not in cache, get the data for this specific outpoint
-	data, err := l.storage.GetOutputData(ctx, outpoint)
+	topic := "tm_" + tokenId
+	data, err := l.storage.GetOutputData(ctx, outpoint, topic)
 	if err != nil {
 		return nil, err
 	}
