@@ -136,6 +136,6 @@ require (
 
 replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockchain/go-overlay-services v0.1.2-0.20250827033248-1859c1f26fa8
 
-replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20250611003449-d3d47c4c4967
+replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20250827182150-e9075978936a
 
-replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20250827165224-4de04131c6df
+replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20250827182618-02aac27c2e9d

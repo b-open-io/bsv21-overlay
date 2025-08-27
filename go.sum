@@ -14,10 +14,10 @@ github.com/andybalholm/brotli v1.1.1/go.mod h1:05ib4cKhjx3OQYUY22hTVd34Bc8upXjOL
 github.com/anmitsu/go-shlex v0.0.0-20161002113705-648efa622239/go.mod h1:2FmKhYUyUczH0OGQWaF5ceTx0UBShxjsH6f8oGKYe2c=
 github.com/apapsch/go-jsonmerge/v2 v2.0.0 h1:axGnT1gRIfimI7gJifB699GoE/oq+F2MU7Dml6nw9rQ=
 github.com/apapsch/go-jsonmerge/v2 v2.0.0/go.mod h1:lvDnEdqiQrp0O42VQGgmlKpxL1AP2+08jFMw88y4klk=
-github.com/b-open-io/go-templates v0.0.0-20250611003449-d3d47c4c4967 h1:O8Ghj6Y4sEZhC5eZBFHhdXQz/X+uN3qyifbOGYWiJd8=
-github.com/b-open-io/go-templates v0.0.0-20250611003449-d3d47c4c4967/go.mod h1:xFs0s0P1uT0cReDWg1kbTV1T/7Nm5yt42GKDn9bPjSw=
-github.com/b-open-io/overlay v0.3.1-0.20250827165224-4de04131c6df h1:mSU/F5UK6Dy0fWV/z+HKBKW7j7RMgGqWPeOnnsYvlso=
-github.com/b-open-io/overlay v0.3.1-0.20250827165224-4de04131c6df/go.mod h1:C4sfSCayGzN+voD9JOPpvWMz7PSFtcvs369TZklHzNc=
+github.com/b-open-io/go-templates v0.0.0-20250827182150-e9075978936a h1:O99Afl47z2b1wmog5vfIc7AFUmEmMSKPYaLQ6SVI9kw=
+github.com/b-open-io/go-templates v0.0.0-20250827182150-e9075978936a/go.mod h1:xFs0s0P1uT0cReDWg1kbTV1T/7Nm5yt42GKDn9bPjSw=
+github.com/b-open-io/overlay v0.3.1-0.20250827182618-02aac27c2e9d h1:2Vvb5UsL3b3Xq9s3OKT51WlFydxZx5TToa1A8Klpz1E=
+github.com/b-open-io/overlay v0.3.1-0.20250827182618-02aac27c2e9d/go.mod h1:C4sfSCayGzN+voD9JOPpvWMz7PSFtcvs369TZklHzNc=
 github.com/benbjohnson/clock v1.3.5 h1:VvXlSJBzZpA/zum6Sj74hxwYI2DIxRWuNIoXAzHZz5o=
 github.com/benbjohnson/clock v1.3.5/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=
