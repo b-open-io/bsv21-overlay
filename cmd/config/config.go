@@ -24,6 +24,9 @@ type PeerSettings struct {
 // Package-level variables for configuration
 var (
 	eventsURL string
+	beefURL   string
+	queueURL  string
+	pubsubURL string
 	tokenID   string
 	peerURL   string
 	sseFlag   bool
@@ -37,6 +40,9 @@ func init() {
 	
 	// Define all flags with environment variable defaults
 	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
+	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
+	flag.StringVar(&queueURL, "queue", os.Getenv("QUEUE_URL"), "Queue storage URL")
+	flag.StringVar(&pubsubURL, "pubsub", os.Getenv("PUBSUB_URL"), "PubSub URL")
 	flag.StringVar(&tokenID, "token", "", "Token ID")
 	flag.StringVar(&peerURL, "peer", "", "Peer URL")
 	flag.BoolVar(&sseFlag, "sse", false, "Enable SSE")
@@ -56,13 +62,8 @@ func main() {
 	// Parse flags from the remaining arguments (after the command)
 	flag.CommandLine.Parse(os.Args[2:])
 
-	// Create storage using only eventsURL (config only needs Redis-style operations)
-	storage, err := config.CreateEventStorage(
-		eventsURL, 
-		"", // No BEEF storage needed
-		"", // No queue storage needed - will default to ~/.1sat/queue.db
-		"", // No pub/sub needed - will default to channels://
-	)
+	// Create storage using the same configuration as server.go
+	storage, err := config.CreateEventStorage(eventsURL, beefURL, queueURL, pubsubURL)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
