@@ -174,10 +174,11 @@ func (l *Bsv21EventsLookup) Lookup(ctx context.Context, question *lookup.LookupQ
 
 // GetBalance calculates the total balance of BSV21 tokens for given event patterns
 // Balance is always calculated for unspent outputs only
-func (l *Bsv21EventsLookup) GetBalance(ctx context.Context, events []string) (uint64, int, error) {
+func (l *Bsv21EventsLookup) GetBalance(ctx context.Context, events []string, topic string) (uint64, int, error) {
 	// Use the storage interface to query for outpoints with the given events
 	question := &storage.EventQuestion{
 		Events:      events,
+		Topic:       topic,
 		UnspentOnly: true, // Balance is always for unspent outputs only
 		From:        0,
 		Limit:       0, // No limit - get all results

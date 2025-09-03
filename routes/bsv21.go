@@ -209,7 +209,7 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		log.Printf("Received balance request for token %s, %s address %s", tokenId, lockType, address)
 
 		// Get balance for the single event
-		balance, outputs, err := bsv21Lookup.GetBalance(c.Context(), []string{event})
+		balance, outputs, err := bsv21Lookup.GetBalance(c.Context(), []string{event}, topic)
 		if err != nil {
 			log.Printf("Balance calculation error: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -279,6 +279,7 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		// Get UTXOs for the single event using FindOutputData (now includes full data)
 		question := &storage.EventQuestion{
 			Events:      []string{event},
+			Topic:       topic,
 			UnspentOnly: true,
 			From:        0,
 			Limit:       0, // No limit
@@ -339,7 +340,7 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		}
 
 		// Get total balance for all addresses combined
-		balance, utxoCount, err := bsv21Lookup.GetBalance(c.Context(), events)
+		balance, utxoCount, err := bsv21Lookup.GetBalance(c.Context(), events, topic)
 		if err != nil {
 			log.Printf("Balance calculation error: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -459,6 +460,7 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		// Get UTXOs for all addresses combined using FindOutputData
 		question := &storage.EventQuestion{
 			Events:      events,
+			Topic:       topic,
 			UnspentOnly: true,
 			From:        0,
 			Limit:       0, // No limit
