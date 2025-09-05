@@ -16,8 +16,8 @@ github.com/apapsch/go-jsonmerge/v2 v2.0.0 h1:axGnT1gRIfimI7gJifB699GoE/oq+F2MU7D
 github.com/apapsch/go-jsonmerge/v2 v2.0.0/go.mod h1:lvDnEdqiQrp0O42VQGgmlKpxL1AP2+08jFMw88y4klk=
 github.com/b-open-io/go-templates v0.0.0-20250827182150-e9075978936a h1:O99Afl47z2b1wmog5vfIc7AFUmEmMSKPYaLQ6SVI9kw=
 github.com/b-open-io/go-templates v0.0.0-20250827182150-e9075978936a/go.mod h1:xFs0s0P1uT0cReDWg1kbTV1T/7Nm5yt42GKDn9bPjSw=
-github.com/b-open-io/overlay v0.3.1-0.20250905183943-c83f58262aed h1:96ZPEmjKgI+OkLv6L/88tkjHEFXgvQ8ZCmV9ZRftN08=
-github.com/b-open-io/overlay v0.3.1-0.20250905183943-c83f58262aed/go.mod h1:2+41pV2+kwiDw8LddWFGxCdIjTZv1MAG2dvRTl3uqEE=
+github.com/b-open-io/overlay v0.3.1-0.20250905191557-96639aa66f7b h1:gZS9/dX/WYr+0vP4S+CmBnIVM3B319RK/JpDgpTpZoo=
+github.com/b-open-io/overlay v0.3.1-0.20250905191557-96639aa66f7b/go.mod h1:2+41pV2+kwiDw8LddWFGxCdIjTZv1MAG2dvRTl3uqEE=
 github.com/benbjohnson/clock v1.3.5 h1:VvXlSJBzZpA/zum6Sj74hxwYI2DIxRWuNIoXAzHZz5o=
 github.com/benbjohnson/clock v1.3.5/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=
