@@ -37,10 +37,10 @@ var (
 	PORT              int
 	SYNC              bool
 	LIBP2P_SYNC       bool
-	sseSyncManager    *sync.SSESyncManager       // Centralized SSE sync manager
-	libp2pSyncManager *sync.LibP2PSyncManager    // LibP2P-based transaction sync manager
-	libp2pSync        *pubsub.LibP2PSync         // LibP2P sync instance for routes
-	peerBroadcaster   *pubsub.PeerBroadcaster    // Peer transaction broadcaster
+	sseSyncManager    *sync.SSESyncManager    // Centralized SSE sync manager
+	libp2pSyncManager *sync.LibP2PSyncManager // LibP2P-based transaction sync manager
+	libp2pSync        *pubsub.LibP2PSync      // LibP2P sync instance for routes
+	peerBroadcaster   *pubsub.PeerBroadcaster // Peer transaction broadcaster
 	e                 *engine.Engine
 )
 
@@ -215,7 +215,7 @@ func main() {
 	if SYNC {
 		go func() {
 			log.Println("Starting GASP sync...")
-			
+
 			// Create separate engine for GASP sync with SyncModeFull topic managers
 			gaspEngine := &engine.Engine{
 				Managers:          map[string]engine.TopicManager{},
@@ -226,7 +226,7 @@ func main() {
 				Storage:           e.Storage,           // Share storage
 				ChainTracker:      e.ChainTracker,      // Share chain tracker
 			}
-			
+
 			// Create SyncModeFull topic managers for the same topics as main engine
 			for topicId := range e.Managers {
 				// Extract tokenId from topic (remove "tm_" prefix)
@@ -238,9 +238,9 @@ func main() {
 					topics.SyncModeFull,
 				)
 			}
-			
+
 			log.Printf("Created GASP engine with %d SyncModeFull topic managers", len(gaspEngine.Managers))
-			
+
 			if err := gaspEngine.StartGASPSync(ctx); err != nil {
 				log.Printf("Error starting GASP sync: %v", err)
 			}
