@@ -2,6 +2,8 @@ package topics
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
@@ -19,6 +21,31 @@ const (
 	// SyncModeAdhoc processes transactions as encountered, missing inputs may arrive later (SSE/LibP2P/submit)
 	SyncModeAdhoc
 )
+
+// MissingInputError represents a missing input with specific transaction details
+type MissingInputError struct {
+	TransactionID *chainhash.Hash // The transaction that's missing an input
+	InputIndex    uint32          // Which input index is missing
+	MissingTxID   *chainhash.Hash // The source transaction ID that's missing
+	OutputIndex   uint32          // The output index in the missing transaction
+	Message       string          // Additional context
+}
+
+func (e *MissingInputError) Error() string {
+	return fmt.Sprintf("%s: transaction %s input[%d] missing source %s:%d", 
+		e.Message, e.TransactionID.String(), e.InputIndex, e.MissingTxID.String(), e.OutputIndex)
+}
+
+// NewMissingInputError creates a new MissingInputError
+func NewMissingInputError(txid, missingTxID *chainhash.Hash, inputIndex, outputIndex uint32, message string) *MissingInputError {
+	return &MissingInputError{
+		TransactionID: txid,
+		InputIndex:    inputIndex,
+		MissingTxID:   missingTxID,
+		OutputIndex:   outputIndex,
+		Message:       message,
+	}
+}
 
 type Bsv21ValidatedTopicManager struct {
 	topic    string
@@ -40,6 +67,11 @@ func NewBsv21ValidatedTopicManager(topic string, storage engine.Storage, tokenId
 		}
 	}
 	return
+}
+
+// SetSyncMode allows changing the sync mode at runtime
+func (tm *Bsv21ValidatedTopicManager) SetSyncMode(mode SyncMode) {
+	tm.syncMode = mode
 }
 
 func (tm *Bsv21ValidatedTopicManager) HasTokenId(tokenId string) bool {
@@ -111,6 +143,7 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 
 			if txout, ok := previousCoins[uint32(vin)]; ok {
 				// We have this input - process it
+				slog.Debug("BSV21_INPUT_FOUND", "topic", tm.topic, "txid", txid.String(), "vin", vin, "source_txid", txin.SourceTXID.String())
 				if b := bsv21.Decode(txout.LockingScript); b != nil {
 					if b.Op == string(bsv21.OpMint) {
 						b.Id = outpoint.OrdinalString()
@@ -133,10 +166,14 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 							b.Id = outpoint.OrdinalString()
 						}
 						if tm.HasTokenId(b.Id) {
+							// NOW log the missing input - we confirmed it's a relevant BSV21 token
+							slog.Warn("BSV21_INPUT_MISSING", "topic", tm.topic, "txid", txid.String(), "vin", vin, "source_txid", txin.SourceTXID.String(), "source_vout", txin.SourceTxOutIndex, "token_id", b.Id, "sync_mode", tm.syncMode)
 							if tm.syncMode == SyncModeAdhoc {
-								return admit, engine.ErrMissingInput
+								slog.Info("THROWING_MISSING_INPUT_ERROR", "topic", tm.topic, "txid", txid.String(), "sync_mode", tm.syncMode, "mode_check", "SyncModeAdhoc")
+								return admit, NewMissingInputError(txid, txin.SourceTXID, uint32(vin), txin.SourceTxOutIndex, "BSV21_INPUT_MISSING")
 							}
 							// In full sync mode, missing inputs don't exist - continue processing
+							slog.Info("IGNORING_MISSING_INPUT_FULL_MODE", "topic", tm.topic, "txid", txid.String(), "sync_mode", tm.syncMode, "mode_check", "SyncModeFull")
 						}
 					}
 				}
