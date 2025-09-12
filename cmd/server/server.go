@@ -84,7 +84,7 @@ func init() {
 		PORT = 3000
 	}
 	if arcURL == "" {
-		arcURL = "https://arc.gorillapool.io"
+		arcURL = "https://arc.gorillapool.io/v1"
 	}
 	if headersURL == "" {
 		headersURL = "https://mainnet.headers.gorillapool.io"
@@ -214,35 +214,44 @@ func main() {
 	// Start GASP sync if requested
 	if SYNC {
 		go func() {
-			log.Println("Starting GASP sync...")
+			for {
+				log.Println("Starting GASP sync...")
 
-			// Create separate engine for GASP sync with SyncModeFull topic managers
-			gaspEngine := &engine.Engine{
-				Managers:          map[string]engine.TopicManager{},
-				LookupServices:    e.LookupServices,    // Share lookup services
-				SyncConfiguration: e.SyncConfiguration, // Share sync configuration
-				Broadcaster:       e.Broadcaster,       // Share broadcaster
-				HostingURL:        e.HostingURL,        // Share hosting URL
-				Storage:           e.Storage,           // Share storage
-				ChainTracker:      e.ChainTracker,      // Share chain tracker
-			}
+				// Create separate engine for GASP sync with SyncModeFull topic managers
+				gaspEngine := &engine.Engine{
+					Managers:          map[string]engine.TopicManager{},
+					LookupServices:    e.LookupServices,    // Share lookup services
+					SyncConfiguration: e.SyncConfiguration, // Share sync configuration
+					Broadcaster:       e.Broadcaster,       // Share broadcaster
+					HostingURL:        e.HostingURL,        // Share hosting URL
+					Storage:           e.Storage,           // Share storage
+					ChainTracker:      e.ChainTracker,      // Share chain tracker
+				}
 
-			// Create SyncModeFull topic managers for the same topics as main engine
-			for topicId := range e.Managers {
-				// Extract tokenId from topic (remove "tm_" prefix)
-				tokenId := topicId[3:]
-				gaspEngine.Managers[topicId] = topics.NewBsv21ValidatedTopicManager(
-					topicId,
-					store,
-					[]string{tokenId},
-					topics.SyncModeFull,
-				)
-			}
+				// Create SyncModeFull topic managers for the same topics as main engine
+				for topicId := range e.Managers {
+					// Extract tokenId from topic (remove "tm_" prefix)
+					tokenId := topicId[3:]
+					gaspEngine.Managers[topicId] = topics.NewBsv21ValidatedTopicManager(
+						topicId,
+						store,
+						[]string{tokenId},
+						topics.SyncModeFull,
+					)
+				}
 
-			log.Printf("Created GASP engine with %d SyncModeFull topic managers", len(gaspEngine.Managers))
+				log.Printf("Created GASP engine with %d SyncModeFull topic managers", len(gaspEngine.Managers))
 
-			if err := gaspEngine.StartGASPSync(ctx); err != nil {
-				log.Printf("Error starting GASP sync: %v", err)
+				if err := gaspEngine.StartGASPSync(ctx); err != nil {
+					log.Printf("Error starting GASP sync: %v", err)
+				}
+				select {
+				case <-ctx.Done():
+					log.Println("GASP sync shutting down...")
+					return
+				case <-time.After(10 * time.Minute):
+					log.Println("Restarting GASP sync...")
+				}
 			}
 		}()
 
