@@ -17,6 +17,7 @@ import (
 	bsv21routes "github.com/b-open-io/bsv21-overlay/routes"
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/config"
+	"github.com/b-open-io/overlay/headers"
 	"github.com/b-open-io/overlay/pubsub"
 	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
@@ -24,7 +25,6 @@ import (
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
 	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
-	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
@@ -32,7 +32,7 @@ import (
 
 // Global variables
 var (
-	chaintracker      *headers_client.Client
+	chaintracker      *headers.Client
 	broadcast         *broadcaster.Arc
 	PORT              int
 	SYNC              bool
@@ -91,10 +91,10 @@ func init() {
 	}
 
 	// Set up chain tracker
-	chaintracker = &headers_client.Client{
+	chaintracker = headers.NewClient(headers.ClientParams{
 		Url:    headersURL,
 		ApiKey: headersKey,
-	}
+	})
 
 	broadcast = &broadcaster.Arc{
 		ApiUrl:        arcURL,

@@ -12,14 +12,14 @@ import (
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/transaction"
-	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
+	"github.com/b-open-io/overlay/headers"
 	"github.com/gofiber/fiber/v2"
 )
 
 // BSV21RoutesConfig holds the configuration for BSV21-specific routes
 type BSV21RoutesConfig struct {
 	Storage      *storage.EventDataStorage
-	ChainTracker *headers_client.Client
+	ChainTracker *headers.Client
 	Engine       *engine.Engine
 	BSV21Lookup  *lookups.Bsv21EventsLookup
 }
