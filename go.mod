@@ -142,4 +142,5 @@ replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.
 
 replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20250909045302-0b86e7168b32
 
-replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20250917151916-6464e85a1796
+// replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20250917151916-6464e85a1796
+replace github.com/b-open-io/overlay => ../overlay

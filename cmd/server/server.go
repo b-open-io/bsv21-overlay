@@ -158,9 +158,9 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// Create storage using the cleaned up configuration
+	// Create storage using the cleaned up configuration with chaintracker for validation
 	var err error
-	store, err = config.CreateEventStorage(eventsURL, beefURL, queueURL, pubsubURL)
+	store, err = config.CreateEventStorage(eventsURL, beefURL, queueURL, pubsubURL, chaintracker)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
