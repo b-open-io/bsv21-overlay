@@ -63,7 +63,8 @@ func main() {
 	flag.CommandLine.Parse(os.Args[2:])
 
 	// Create storage using the same configuration as server.go
-	storage, err := config.CreateEventStorage(eventsURL, beefURL, queueURL, pubsubURL)
+	// Config tool doesn't need headers client since it only manages queue storage
+	storage, err := config.CreateEventStorage(eventsURL, beefURL, queueURL, pubsubURL, nil)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}

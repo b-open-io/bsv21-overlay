@@ -18,6 +18,8 @@ import (
 	"github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/headers"
+	"github.com/b-open-io/overlay/headers/processor"
+	headersRoutes "github.com/b-open-io/overlay/headers/routes"
 	"github.com/b-open-io/overlay/pubsub"
 	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
@@ -46,16 +48,17 @@ var (
 
 // Configuration from flags/env
 var (
-	eventsURL  string
-	beefURL    string
-	queueURL   string
-	pubsubURL  string
-	arcURL     string
-	arcAPIKey  string
-	arcToken   string
-	hostingURL string
-	headersURL string
-	headersKey string
+	eventsURL    string
+	beefURL      string
+	queueURL     string
+	pubsubURL    string
+	arcURL       string
+	arcAPIKey    string
+	arcToken     string
+	hostingURL   string
+	headersURL   string
+	headersKey   string
+	webhookToken string // Token for authenticating webhook callbacks
 )
 
 func init() {
@@ -78,6 +81,7 @@ func init() {
 	flag.StringVar(&hostingURL, "hosting", os.Getenv("HOSTING_URL"), "Hosting URL")
 	flag.StringVar(&headersURL, "headers", os.Getenv("HEADERS_URL"), "Block headers service URL")
 	flag.StringVar(&headersKey, "headers-key", os.Getenv("HEADERS_KEY"), "Block headers API key")
+	flag.StringVar(&webhookToken, "webhook-token", os.Getenv("WEBHOOK_TOKEN"), "Webhook authentication token")
 	flag.Parse()
 	// Apply defaults
 	if PORT == 0 {
@@ -171,6 +175,9 @@ func main() {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
 
+	// Start headers processor for merkle root reconciliation with 1 minute polling
+	go processor.Start(ctx, chaintracker, store, 1*time.Minute)
+
 	// Initialize engine
 	e = &engine.Engine{
 		Managers: map[string]engine.TopicManager{},
@@ -242,6 +249,14 @@ func main() {
 
 				log.Printf("Created GASP engine with %d SyncModeFull topic managers", len(gaspEngine.Managers))
 
+				// First sync any invalidated outputs (e.g., from reorgs)
+				for topicId := range gaspEngine.Managers {
+					if err := gaspEngine.SyncInvalidatedOutputs(ctx, topicId); err != nil {
+						log.Printf("Error syncing invalidated outputs for topic %s: %v", topicId, err)
+					}
+				}
+
+				// Then perform regular GASP sync
 				if err := gaspEngine.StartGASPSync(ctx); err != nil {
 					log.Printf("Error starting GASP sync: %v", err)
 				}
@@ -381,6 +396,24 @@ func main() {
 		Engine:           e,
 	})
 
+	// Register headers webhook route and webhook with block headers service if hosting URL is configured
+	var webhookURL string
+	if hostingURL != "" {
+		headersRoutes.RegisterWebhookRoutes(onesat, headersRoutes.WebhookConfig{
+			HeadersClient: chaintracker,
+			EventStorage:  store,
+			WebhookToken:  webhookToken, // Can be empty string if not configured
+		})
+
+		// Register webhook with block headers service
+		webhookURL = fmt.Sprintf("%s/api/1sat/headers/webhook", hostingURL)
+		if _, err := chaintracker.RegisterWebhook(ctx, webhookURL, webhookToken); err != nil {
+			log.Printf("Failed to register webhook with block headers service: %v", err)
+		} else {
+			log.Printf("Registered webhook with block headers service: %s", webhookURL)
+		}
+	}
+
 	// Start the server in a goroutine
 	go func() {
 		log.Printf("Starting server on port %d...", PORT)
@@ -392,6 +425,14 @@ func main() {
 
 	// Wait for context cancellation
 	<-ctx.Done()
+
+	// Unregister webhook if it was registered
+	if webhookURL != "" {
+		log.Printf("Unregistering webhook: %s", webhookURL)
+		if err := chaintracker.UnregisterWebhook(context.Background(), webhookURL); err != nil {
+			log.Printf("Failed to unregister webhook: %v", err)
+		}
+	}
 
 	// Shutdown the server
 	log.Println("Shutting down HTTP server...")
