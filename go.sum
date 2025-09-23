@@ -16,6 +16,8 @@ github.com/apapsch/go-jsonmerge/v2 v2.0.0 h1:axGnT1gRIfimI7gJifB699GoE/oq+F2MU7D
 github.com/apapsch/go-jsonmerge/v2 v2.0.0/go.mod h1:lvDnEdqiQrp0O42VQGgmlKpxL1AP2+08jFMw88y4klk=
 github.com/b-open-io/go-templates v0.0.0-20250909045302-0b86e7168b32 h1:0JmCgiTiiJuX8VTyqtGyDPgtebpayiecLgXjBCK8XN4=
 github.com/b-open-io/go-templates v0.0.0-20250909045302-0b86e7168b32/go.mod h1:xFs0s0P1uT0cReDWg1kbTV1T/7Nm5yt42GKDn9bPjSw=
+github.com/b-open-io/overlay v0.3.1-0.20250923142013-1cf8e824d8d2 h1:jvGNAQ5pcqnFe4m2T9vrMhd6Avj5M1DZpDA0pmD0Zk0=
+github.com/b-open-io/overlay v0.3.1-0.20250923142013-1cf8e824d8d2/go.mod h1:EKQXFGreypZEjwcv3weKST4yK36FfFgmJzeYt+VkepA=
 github.com/benbjohnson/clock v1.3.5 h1:VvXlSJBzZpA/zum6Sj74hxwYI2DIxRWuNIoXAzHZz5o=
 github.com/benbjohnson/clock v1.3.5/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=
@@ -27,6 +29,8 @@ github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
 github.com/bsm/gomega v1.27.10/go.mod h1:JyEr/xRbxbtgWNi8tIEVPUYZ5Dzef52k01W3YH0H+O0=
+github.com/bsv-blockchain/go-overlay-services v0.1.2-0.20250923140724-f1d9d85234ba h1:ZzqkybXZE3Wq3SiS7nu5GgKrLdPI/0F6hWqpKuEUApk=
+github.com/bsv-blockchain/go-overlay-services v0.1.2-0.20250923140724-f1d9d85234ba/go.mod h1:T7RfuL97CAzWl7K6C1grrnvcsX0LcaKEG5nP7HopX9s=
 github.com/bsv-blockchain/go-sdk v1.2.11-0.20250920022700-8e346816aa35 h1:FaVMk3TXWDCGdgRaihmbKLBi/n1nhCPZcyA/a+9BguM=
 github.com/bsv-blockchain/go-sdk v1.2.11-0.20250920022700-8e346816aa35/go.mod h1:C1r7iZbRUCbC015GjbhcpwH0jL5ubPn5XaQgjvUaPdU=
 github.com/bsv-blockchain/universal-test-vectors v0.5.0 h1:DhMyIR0wl4Krnh2hoLBWou/3FfCcXCFOolSOrADpO50=

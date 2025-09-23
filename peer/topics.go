@@ -43,8 +43,9 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store *storage.Even
 	// Build new managers map
 	newManagers := make(map[string]engine.TopicManager)
 
-	whitelistCount := 0
-	activeCount := 0
+	// Track changes for logging
+	addedTopics := []string{}
+	removedTopics := []string{}
 
 	// Process whitelist tokens (with full peer configuration)
 	for _, tokenId := range whitelistTokens {
@@ -65,11 +66,10 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store *storage.Even
 				[]string{tokenId},
 				topics.SyncModeAdhoc,
 			)
+			addedTopics = append(addedTopics, topic)
 		}
 
 		// Peer configuration is now handled by config.ConfigureSync and config.GetBroadcastPeerTopics
-
-		whitelistCount++
 	}
 
 	// Process active balance tokens (basic topic managers only)
@@ -97,17 +97,28 @@ func RegisterTopics(ctx context.Context, eng *engine.Engine, store *storage.Even
 				[]string{tokenId},
 				topics.SyncModeAdhoc,
 			)
+			addedTopics = append(addedTopics, topic)
 			log.Printf("Created topic manager for active token: %s (balance: %.0f)", topic, scoreItem.Score)
 		}
+	}
 
-		activeCount++
+	// Find removed topics
+	for existingTopic := range eng.Managers {
+		if _, stillExists := newManagers[existingTopic]; !stillExists {
+			removedTopics = append(removedTopics, existingTopic)
+		}
 	}
 
 	// Replace engine managers with new map
 	eng.Managers = newManagers
 
-	log.Printf("Registered %d topic managers (%d whitelist + %d active, %d blacklisted)",
-		len(newManagers), whitelistCount, activeCount, len(blacklist))
+	// Log only changes
+	if len(addedTopics) > 0 {
+		log.Printf("Added %d topic managers: %v", len(addedTopics), addedTopics)
+	}
+	if len(removedTopics) > 0 {
+		log.Printf("Removed %d topic managers: %v", len(removedTopics), removedTopics)
+	}
 
 	return nil
 }
