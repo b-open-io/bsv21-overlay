@@ -1,1 +1,1 @@
-web: ./server.run
+web: bin/server
