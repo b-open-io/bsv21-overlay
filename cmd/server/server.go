@@ -1,8 +1,7 @@
-package main
+package server
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -30,6 +29,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
+	"github.com/spf13/cobra"
 )
 
 // Global variables
@@ -39,10 +39,10 @@ var (
 	PORT              int
 	SYNC              bool
 	LIBP2P_SYNC       bool
-	sseSyncManager    *sync.SSESyncManager    // Centralized SSE sync manager
-	libp2pSyncManager *sync.LibP2PSyncManager // LibP2P-based transaction sync manager
-	libp2pSync        *pubsub.LibP2PSync      // LibP2P sync instance for routes
-	peerBroadcaster   *pubsub.PeerBroadcaster // Peer transaction broadcaster
+	sseSyncManager    *sync.SSESyncManager
+	libp2pSyncManager *sync.LibP2PSyncManager
+	libp2pSync        *pubsub.LibP2PSync
+	peerBroadcaster   *pubsub.PeerBroadcaster
 	e                 *engine.Engine
 )
 
@@ -58,31 +58,43 @@ var (
 	hostingURL   string
 	headersURL   string
 	headersKey   string
-	webhookToken string // Token for authenticating webhook callbacks
+	webhookToken string
 )
 
+// Command exports the server command for use in the main CLI
+var Command = &cobra.Command{
+	Use:   "server",
+	Short: "Start the BSV-21 overlay API server",
+	Long: `Start the HTTP API server providing lookup, streaming endpoints,
+and integrated transaction processing for BSV-21 tokens.`,
+	Run: runServer,
+}
+
 func init() {
+	// Load .env file
 	godotenv.Load(".env")
 
 	// Parse PORT from env before flags
 	PORT, _ = strconv.Atoi(os.Getenv("PORT"))
 
-	// Define command-line flags with env var defaults
-	flag.IntVar(&PORT, "p", PORT, "Port to listen on")
-	flag.BoolVar(&SYNC, "s", false, "Start sync")
-	flag.BoolVar(&LIBP2P_SYNC, "p2p", os.Getenv("LIBP2P_SYNC") == "true", "Enable LibP2P sync")
-	flag.StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
-	flag.StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
-	flag.StringVar(&queueURL, "queue", os.Getenv("QUEUE_URL"), "Queue storage URL")
-	flag.StringVar(&pubsubURL, "pubsub", os.Getenv("PUBSUB_URL"), "PubSub URL")
-	flag.StringVar(&arcURL, "arc-url", os.Getenv("ARC_URL"), "Arc broadcaster URL")
-	flag.StringVar(&arcAPIKey, "arc-key", os.Getenv("ARC_API_KEY"), "Arc API key")
-	flag.StringVar(&arcToken, "arc-token", os.Getenv("ARC_CALLBACK_TOKEN"), "Arc callback token")
-	flag.StringVar(&hostingURL, "hosting", os.Getenv("HOSTING_URL"), "Hosting URL")
-	flag.StringVar(&headersURL, "headers", os.Getenv("HEADERS_URL"), "Block headers service URL")
-	flag.StringVar(&headersKey, "headers-key", os.Getenv("HEADERS_KEY"), "Block headers API key")
-	flag.StringVar(&webhookToken, "webhook-token", os.Getenv("WEBHOOK_TOKEN"), "Webhook authentication token")
-	flag.Parse()
+	// Define server command flags with env var defaults
+	Command.Flags().IntVarP(&PORT, "port", "p", PORT, "Port to listen on")
+	Command.Flags().BoolVarP(&SYNC, "sync", "s", false, "Start sync")
+	Command.Flags().BoolVar(&LIBP2P_SYNC, "p2p", os.Getenv("LIBP2P_SYNC") == "true", "Enable LibP2P sync")
+	Command.Flags().StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
+	Command.Flags().StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
+	Command.Flags().StringVar(&queueURL, "queue", os.Getenv("QUEUE_URL"), "Queue storage URL")
+	Command.Flags().StringVar(&pubsubURL, "pubsub", os.Getenv("PUBSUB_URL"), "PubSub URL")
+	Command.Flags().StringVar(&arcURL, "arc-url", os.Getenv("ARC_URL"), "Arc broadcaster URL")
+	Command.Flags().StringVar(&arcAPIKey, "arc-key", os.Getenv("ARC_API_KEY"), "Arc API key")
+	Command.Flags().StringVar(&arcToken, "arc-token", os.Getenv("ARC_CALLBACK_TOKEN"), "Arc callback token")
+	Command.Flags().StringVar(&hostingURL, "hosting", os.Getenv("HOSTING_URL"), "Hosting URL")
+	Command.Flags().StringVar(&headersURL, "headers", os.Getenv("HEADERS_URL"), "Block headers service URL")
+	Command.Flags().StringVar(&headersKey, "headers-key", os.Getenv("HEADERS_KEY"), "Block headers API key")
+	Command.Flags().StringVar(&webhookToken, "webhook-token", os.Getenv("WEBHOOK_TOKEN"), "Webhook authentication token")
+}
+
+func runServer(cmd *cobra.Command, args []string) {
 	// Apply defaults
 	if PORT == 0 {
 		PORT = 3000
@@ -110,9 +122,7 @@ func init() {
 		url := fmt.Sprintf("%s/api/v1/arc-ingest", hostingURL)
 		broadcast.CallbackUrl = &url
 	}
-}
 
-func main() {
 	// Create a context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 

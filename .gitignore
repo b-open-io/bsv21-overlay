@@ -5,3 +5,7 @@ data
 
 beef_storage
 *.db*
+
+/bsv21
+/bsv21-overlay
+/bsv21-linux
