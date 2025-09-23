@@ -5,3 +5,4 @@ data
 
 beef_storage
 *.db*
+Procfile
