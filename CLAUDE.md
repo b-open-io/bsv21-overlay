@@ -10,10 +10,10 @@ The service is built on a **unified storage interface** that abstracts away back
 
 ## Architecture
 
-The service consists of 2 main executables:
+The service consists of a single executable with 2 main commands:
 
-1. **server.run** - HTTP API server providing lookup, streaming endpoints, and integrated transaction processing
-2. **config.run** - Configuration management CLI for whitelists and peer settings
+1. **bsv21 server** - HTTP API server providing lookup, streaming endpoints, and integrated transaction processing
+2. **bsv21 config** - Configuration management CLI for whitelists and peer settings
 
 ### Unified Storage Architecture
 
@@ -36,20 +36,19 @@ The core innovation is the **EventDataStorage** interface that provides Redis-st
 
 ### Data Flow
 ```
-External Data Sources → server.run → Unified Storage Interface
-                                            ↓
+External Data Sources → bsv21 server → Unified Storage Interface
+                                              ↓
 Clients ← HTTP API ← Event Storage (Redis/MongoDB/SQLite)
 ```
 
 ## Build Commands
 
 ```bash
-# Build all executables
+# Build the unified executable
 ./build.sh
 
 # Or build individually:
-go build -o server.run ./cmd/server/
-go build -o config.run cmd/config/config.go
+go build -o bsv21 .
 
 # Run tests
 go test ./...
@@ -63,14 +62,14 @@ go test ./sandbox -run TestName
 Start the main API server:
 ```bash
 # Start the API server with integrated processing
-./server.run
+./bsv21 server
 ```
 
 The config utility can be run as needed:
 ```bash
 # Manage token whitelist and peer configurations
-./config.run whitelist-add -token your_token_id
-./config.run peer-add -token your_token_id -peer https://peer.example.com
+./bsv21 config whitelist add --token your_token_id
+./bsv21 config peer add --token your_token_id --peer https://peer.example.com
 ```
 
 ## Configuration
