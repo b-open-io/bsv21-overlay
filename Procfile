@@ -1,1 +1,1 @@
-web: bin/server -s=true
+web: ./bin/bsv21-overlay server -s
