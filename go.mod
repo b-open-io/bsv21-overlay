@@ -16,6 +16,24 @@ require (
 require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.39.1 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.1 // indirect
+	github.com/aws/aws-sdk-go-v2/config v1.31.10 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.18.14 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.8 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.8 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.8 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.3 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.8.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.88.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.29.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.38.5 // indirect
+	github.com/aws/smithy-go v1.23.0 // indirect
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -147,6 +165,6 @@ replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.
 
 replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20250909045302-0b86e7168b32
 
-replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20250923142013-1cf8e824d8d2
+replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20250924005030-423b3891bf6e
 
 // replace github.com/b-open-io/overlay => ../overlay
