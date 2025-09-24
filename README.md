@@ -44,20 +44,20 @@ The BSV21 overlay service is a complete solution for working with BSV21 tokens:
 git clone https://github.com/your-org/bsv21-overlay.git
 cd bsv21-overlay
 
-# Build all executables
+# Build the executable
 ./build.sh
 
 # Set required environment variable
 export HEADERS_URL=
 
 # Whitelist a token you want to track
-./config.run whitelist-add -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+./bsv21 config whitelist add --token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
 
 # Configure peer synchronization (optional)
-./config.run peer-add -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 -peer=https://bsv21.1sat.app -gasp -sse
+./bsv21 config peer add --token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 --peer=https://bsv21.1sat.app --gasp --sse
 
 # Start the server with sync enabled
-./server.run -p=3000 -s=true
+./bsv21 server --port=3000 --sync
 ```
 
 That's it! The service now uses intelligent defaults:
@@ -73,31 +73,31 @@ Before the overlay can process tokens, you need to configure which tokens to tra
 #### Add tokens to whitelist
 ```bash
 # Add a specific token
-./config.run whitelist-add -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+./bsv21 config whitelist add --token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
 
 # List all whitelisted tokens
-./config.run whitelist-list
+./bsv21 config whitelist list
 
 # Remove a token from whitelist
-./config.run whitelist-remove -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+./bsv21 config whitelist remove --token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
 ```
 
 #### Configure peer synchronization
 ```bash
 # Add peer with GASP and SSE sync enabled
-./config.run peer-add -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 \
-    -peer=https://bsv21.1sat.app -gasp -sse -broadcast
+./bsv21 config peer add --token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 \
+    --peer=https://bsv21.1sat.app --gasp --sse --broadcast
 
 # List peers for a token
-./config.run peer-list -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
+./bsv21 config peer list --token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
 
 # Get specific peer settings
-./config.run peer-get -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 \
-    -peer=https://bsv21.1sat.app
+./bsv21 config peer get --token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 \
+    --peer=https://bsv21.1sat.app
 
 # Remove a peer
-./config.run peer-remove -token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 \
-    -peer=https://bsv21.1sat.app
+./bsv21 config peer remove --token=ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0 \
+    --peer=https://bsv21.1sat.app
 ```
 
 ### Advanced Configuration (Optional)
@@ -124,16 +124,16 @@ export HOSTING_URL=http://localhost:3000
 
 ```bash
 # Start with defaults (minimal setup)
-./server.run
+./bsv21 server
 
 # Start with sync enabled
-./server.run -s=true
+./bsv21 server --sync
 
 # Start with custom port and sync
-./server.run -p=8080 -s=true
+./bsv21 server --port=8080 --sync
 
 # Start with LibP2P sync
-./server.run -s=true -p2p=true
+./bsv21 server --sync --p2p
 ```
 
 Once running, you can:
