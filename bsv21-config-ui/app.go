@@ -35,10 +35,11 @@ func (a *App) startup(ctx context.Context) {
 	
 	// Create storage using the same configuration as server
 	storage, err := overlayConfig.CreateEventStorage(
-		os.Getenv("EVENTS_URL"), 
-		os.Getenv("BEEF_URL"), 
+		os.Getenv("EVENTS_URL"),
+		os.Getenv("BEEF_URL"),
 		os.Getenv("QUEUE_URL"),
 		os.Getenv("PUBSUB_URL"),
+		nil, // chaintracker is optional for config UI
 	)
 	if err != nil {
 		log.Printf("Failed to create storage: %v", err)
