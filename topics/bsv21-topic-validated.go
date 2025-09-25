@@ -168,7 +168,6 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 						if tm.HasTokenId(b.Id) {
 							// NOW log the missing input - we confirmed it's a relevant BSV21 token
 							if tm.syncMode == SyncModeAdhoc {
-								slog.Info("THROWING_MISSING_INPUT_ERROR", "topic", tm.topic, "txid", txid.String(), "sync_mode", tm.syncMode, "mode_check", "SyncModeAdhoc")
 								return admit, NewMissingInputError(txid, txin.SourceTXID, uint32(vin), txin.SourceTxOutIndex, "BSV21_INPUT_MISSING")
 							}
 						}
