@@ -363,6 +363,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
 		// EnablePrintRoutes: true, // Set this to true to print routes
+		ErrorHandler: server.GetErrorHandler(), // Use overlay services error handler for proper HTTP status codes
 	})
 	app.Use(logger.New())
 
