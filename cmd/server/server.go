@@ -288,7 +288,7 @@ func runServer(cmd *cobra.Command, args []string) {
 				case <-ctx.Done():
 					log.Println("GASP sync shutting down...")
 					return
-				case <-time.After(10 * time.Minute):
+				case <-time.After(5 * time.Minute):
 					log.Println("Restarting GASP sync...")
 				}
 			}
