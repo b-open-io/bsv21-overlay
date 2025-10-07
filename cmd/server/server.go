@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
@@ -37,6 +39,7 @@ var (
 	chaintracker      *headers.Client
 	broadcast         *broadcaster.Arc
 	PORT              int
+	PPROF_PORT        string
 	SYNC              bool
 	LIBP2P_SYNC       bool
 	sseSyncManager    *sync.SSESyncManager
@@ -79,6 +82,7 @@ func init() {
 
 	// Define server command flags with env var defaults
 	Command.Flags().IntVarP(&PORT, "port", "p", PORT, "Port to listen on")
+	Command.Flags().StringVar(&PPROF_PORT, "pprof", "", "pprof HTTP server port (empty to disable)")
 	Command.Flags().BoolVarP(&SYNC, "sync", "s", false, "Start sync")
 	Command.Flags().BoolVar(&LIBP2P_SYNC, "p2p", os.Getenv("LIBP2P_SYNC") == "true", "Enable LibP2P sync")
 	Command.Flags().StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
@@ -121,6 +125,16 @@ func runServer(cmd *cobra.Command, args []string) {
 	if hostingURL != "" {
 		url := fmt.Sprintf("%s/api/v1/arc-ingest", hostingURL)
 		broadcast.CallbackUrl = &url
+	}
+
+	// Start pprof server if enabled
+	if PPROF_PORT != "" {
+		go func() {
+			log.Printf("Starting pprof server on port %s", PPROF_PORT)
+			if err := http.ListenAndServe(":"+PPROF_PORT, nil); err != nil {
+				log.Printf("pprof server failed: %v", err)
+			}
+		}()
 	}
 
 	// Create a context with cancellation
@@ -274,7 +288,7 @@ func runServer(cmd *cobra.Command, args []string) {
 				case <-ctx.Done():
 					log.Println("GASP sync shutting down...")
 					return
-				case <-time.After(10 * time.Minute):
+				case <-time.After(5 * time.Minute):
 					log.Println("Restarting GASP sync...")
 				}
 			}
@@ -363,6 +377,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
 		// EnablePrintRoutes: true, // Set this to true to print routes
+		ErrorHandler: server.GetErrorHandler(), // Use overlay services error handler for proper HTTP status codes
 	})
 	app.Use(logger.New())
 
