@@ -5,7 +5,7 @@ go 1.25.4
 require (
 	github.com/b-open-io/overlay v0.2.1
 	github.com/bitcoin-sv/go-templates v0.0.0-00010101000000-000000000000
-	github.com/bsv-blockchain/go-chaintracks v0.0.0-00010101000000-000000000000
+	github.com/bsv-blockchain/go-chaintracks v1.0.2
 	github.com/bsv-blockchain/go-overlay-services v0.1.1
 	github.com/bsv-blockchain/go-sdk v1.2.12
 	github.com/gofiber/fiber/v2 v2.52.9
@@ -184,14 +184,12 @@ replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockcha
 
 // replace github.com/bsv-blockchain/go-overlay-services => ../go-overlay-services
 
-replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.2.12-0.20251119144503-b56b04569fb3
+replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.2.12-0.20251119181029-d6554738622b
 
 // replace github.com/bsv-blockchain/go-sdk => ../go-sdk
 
 replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20250909045302-0b86e7168b32
 
-replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20251119145849-c485d2cc6e80
+replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20251119221202-37abeee90184
 
 // replace github.com/b-open-io/overlay => ../overlay
-
-replace github.com/bsv-blockchain/go-chaintracks => github.com/bsv-blockchain/go-chaintracks v0.0.0-20251118174625-5aa03aeb7dcc

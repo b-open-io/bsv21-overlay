@@ -19,7 +19,7 @@ import (
 // BSV21RoutesConfig holds the configuration for BSV21-specific routes
 type BSV21RoutesConfig struct {
 	Storage      *storage.EventDataStorage
-	ChainTracker *chaintracks.ChainManager
+	ChainTracker chaintracks.Chaintracks
 	Engine       *engine.Engine
 	BSV21Lookup  *lookups.Bsv21EventsLookup
 }
@@ -133,9 +133,9 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		response := fiber.Map{
 			"block": fiber.Map{
 				"height":            blockHeader.Height,
-				"hash":              blockHeader.Hash().String(),
-				"previousblockhash": blockHeader.PrevBlock.String(),
-				"timestamp":         blockHeader.Timestamp,
+				"hash":              blockHeader.Hash.String(),
+				"previousblockhash": blockHeader.Header.PrevHash.String(),
+				"timestamp":         blockHeader.Header.Timestamp,
 			},
 			"transactions": transactions,
 		}

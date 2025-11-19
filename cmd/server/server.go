@@ -35,7 +35,7 @@ import (
 
 // Global variables
 var (
-	chaintracker      *chaintracks.ChainManager
+	chaintracker      chaintracks.Chaintracks
 	broadcast         *broadcaster.Arc
 	PORT              int
 	PPROF_PORT        string
@@ -102,12 +102,19 @@ func runServer(cmd *cobra.Command, args []string) {
 		arcURL = "https://arc.gorillapool.io/v1"
 	}
 
-	// Set up chain tracker with optional bootstrap URL from environment
+	// Set up chain tracker - use client if CHAINTRACKS_URL is set, otherwise run locally
 	var err error
-	bootstrapURL := os.Getenv("BOOTSTRAP_URL")
-	chaintracker, err = chaintracks.NewChainManager(network, "~/.chaintracks", bootstrapURL)
-	if err != nil {
-		log.Fatalf("Failed to initialize chain tracker: %v", err)
+	chaintracksURL := os.Getenv("CHAINTRACKS_URL")
+	if chaintracksURL != "" {
+		log.Printf("Using remote chaintracks server at %s", chaintracksURL)
+		chaintracker = chaintracks.NewClient(chaintracksURL)
+	} else {
+		log.Println("Running chaintracks locally")
+		bootstrapURL := os.Getenv("BOOTSTRAP_URL")
+		chaintracker, err = chaintracks.NewChainManager(network, "~/.chaintracks", bootstrapURL)
+		if err != nil {
+			log.Fatalf("Failed to initialize chain tracker: %v", err)
+		}
 	}
 
 	broadcast = &broadcaster.Arc{
@@ -216,7 +223,7 @@ func runServer(cmd *cobra.Command, args []string) {
 					continue
 				}
 
-				log.Printf("New block received: height=%d hash=%s", blockHeader.Height, blockHeader.Hash())
+				log.Printf("New block received: height=%d hash=%s", blockHeader.Height, blockHeader.Hash.String())
 
 				// Reconcile validated merkle roots for this new block
 				if err := store.ReconcileValidatedMerkleRoots(ctx); err != nil {
