@@ -1096,26 +1096,41 @@ components:
       properties:
         height:
           type: integer
+          format: uint32
           description: Block height
+          example: 850000
         hash:
           type: string
-          description: Block hash
-        prevHash:
+          description: Block hash (hex string)
+          example: "0000000000000000000320283a032748cef8227873ff4872689bf23f1cda83a5"
+        version:
+          type: integer
+          format: int32
+          description: Block version
+          example: 536870912
+        prevBlockHash:
           type: string
-          description: Previous block hash
+          description: Previous block hash (hex string)
+          example: "00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054"
         merkleRoot:
           type: string
-          description: Merkle root
-        timestamp:
+          description: Merkle root (hex string)
+          example: "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"
+        creationTimestamp:
           type: integer
-          format: int64
-          description: Block timestamp
-        bits:
+          format: uint32
+          description: Block creation timestamp (Unix time)
+          example: 1731916800
+        difficultyTarget:
           type: integer
-          description: Difficulty bits
+          format: uint32
+          description: Difficulty target bits
+          example: 403011440
         nonce:
           type: integer
-          description: Nonce
+          format: uint32
+          description: Nonce value used in mining
+          example: 2083236893
 
     # Overlay service schemas
     AdmittanceInstructions:

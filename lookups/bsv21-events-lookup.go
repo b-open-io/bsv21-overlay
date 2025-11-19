@@ -34,14 +34,21 @@ func NewBsv21EventsLookup(eventStorage *storage.EventDataStorage) (*Bsv21EventsL
 }
 
 func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *engine.OutputAdmittedByTopic) error {
-
+	_, tx, txid, err := transaction.ParseBeef(payload.AtomicBEEF)
+	if err != nil {
+		return err
+	}
+	outpoint := &transaction.Outpoint{
+		Txid:  *txid,
+		Index: payload.OutputIndex,
+	}
 	// Decode the BSV21 data using the go-templates parser
-	if b := bsv21.Decode(payload.LockingScript); b != nil {
+	if b := bsv21.Decode(tx.Outputs[int(payload.OutputIndex)].LockingScript); b != nil {
 		events := make([]string, 0, 5)
 
 		// For mint operations, set the ID to the ordinal string
 		if b.Op == string(bsv21.OpMint) {
-			b.Id = payload.Outpoint.OrdinalString()
+			b.Id = outpoint.OrdinalString()
 			if b.Symbol != nil {
 				events = append(events, fmt.Sprintf("sym:%s", *b.Symbol))
 			}
@@ -122,7 +129,7 @@ func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *
 
 		// Save all events with the data using the storage layer
 		score := float64(time.Now().UnixNano())
-		if err := l.storage.SaveEvents(ctx, payload.Outpoint, events, payload.Topic, score, dataToStore); err != nil {
+		if err := l.storage.SaveEvents(ctx, outpoint, events, payload.Topic, score, dataToStore); err != nil {
 			return err
 		}
 	}
@@ -307,5 +314,3 @@ func (l *Bsv21EventsLookup) GetToken(ctx context.Context, outpoint *transaction.
 
 	return response, nil
 }
-
-

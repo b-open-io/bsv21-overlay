@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
@@ -51,14 +52,12 @@ type Bsv21ValidatedTopicManager struct {
 	topic    string
 	storage  engine.Storage
 	tokenIds map[string]struct{}
-	syncMode SyncMode
 }
 
-func NewBsv21ValidatedTopicManager(topic string, storage engine.Storage, tokenIds []string, syncMode SyncMode) (tm *Bsv21ValidatedTopicManager) {
+func NewBsv21ValidatedTopicManager(topic string, storage engine.Storage, tokenIds []string) (tm *Bsv21ValidatedTopicManager) {
 	tm = &Bsv21ValidatedTopicManager{
-		topic:    topic,
-		storage:  storage,
-		syncMode: syncMode,
+		topic:   topic,
+		storage: storage,
 	}
 	if len(tokenIds) > 0 {
 		tm.tokenIds = make(map[string]struct{}, len(tokenIds))
@@ -67,11 +66,6 @@ func NewBsv21ValidatedTopicManager(topic string, storage engine.Storage, tokenId
 		}
 	}
 	return
-}
-
-// SetSyncMode allows changing the sync mode at runtime
-func (tm *Bsv21ValidatedTopicManager) SetSyncMode(mode SyncMode) {
-	tm.syncMode = mode
 }
 
 func (tm *Bsv21ValidatedTopicManager) HasTokenId(tokenId string) bool {
@@ -89,7 +83,7 @@ type tokenSummary struct {
 	deploy    bool
 }
 
-func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Context, beefBytes []byte, previousCoins map[uint32]*transaction.TransactionOutput) (admit overlay.AdmittanceInstructions, err error) {
+func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Context, beefBytes []byte, previousCoins []uint32) (admit overlay.AdmittanceInstructions, err error) {
 	_, tx, txid, err := transaction.ParseBeef(beefBytes)
 	if err != nil {
 		return admit, err
@@ -140,37 +134,27 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 				Txid:  *txin.SourceTXID,
 				Index: txin.SourceTxOutIndex,
 			}
-
-			if txout, ok := previousCoins[uint32(vin)]; ok {
-				// We have this input - process it
-				slog.Debug("BSV21_INPUT_FOUND", "topic", tm.topic, "txid", txid.String(), "vin", vin, "source_txid", txin.SourceTXID.String())
-				if b := bsv21.Decode(txout.LockingScript); b != nil {
+			if sourceOutput := txin.SourceTxOutput(); sourceOutput != nil {
+				if b := bsv21.Decode(sourceOutput.LockingScript); b != nil {
 					if b.Op == string(bsv21.OpMint) {
 						b.Id = outpoint.OrdinalString()
 					}
 					if !tm.HasTokenId(b.Id) {
 						continue
 					}
-					admit.CoinsToRetain = append(admit.CoinsToRetain, uint32(vin))
-					if token, ok := summary[b.Id]; ok {
-						token.tokensIn += b.Amt
-					}
+					if slices.Contains(previousCoins, uint32(vin)) {
+						// We have this input - process it
+						slog.Debug("BSV21_INPUT_FOUND", "topic", tm.topic, "txid", txid.String(), "vin", vin, "source_txid", txin.SourceTXID.String())
+						admit.CoinsToRetain = append(admit.CoinsToRetain, uint32(vin))
+						if token, ok := summary[b.Id]; ok {
+							token.tokensIn += b.Amt
+						}
 
-					ancillaryTxids[*txin.SourceTXID] = struct{}{}
-				}
-			} else {
-				// Missing input - check if it's a dependency we care about
-				if sourceOutput := txin.SourceTxOutput(); sourceOutput != nil {
-					if b := bsv21.Decode(sourceOutput.LockingScript); b != nil {
-						if b.Op == string(bsv21.OpMint) {
-							b.Id = outpoint.OrdinalString()
-						}
-						if tm.HasTokenId(b.Id) {
-							// NOW log the missing input - we confirmed it's a relevant BSV21 token
-							if tm.syncMode == SyncModeAdhoc {
-								return admit, NewMissingInputError(txid, txin.SourceTXID, uint32(vin), txin.SourceTxOutIndex, "BSV21_INPUT_MISSING")
-							}
-						}
+						ancillaryTxids[*txin.SourceTXID] = struct{}{}
+
+					} else {
+						// NOW log the missing input - we confirmed it's a relevant BSV21 token
+						return admit, NewMissingInputError(txid, txin.SourceTXID, uint32(vin), txin.SourceTxOutIndex, "BSV21_INPUT_MISSING")
 					}
 				}
 			}
