@@ -150,7 +150,7 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 							token.tokensIn += b.Amt
 						}
 
-						ancillaryTxids[*txin.SourceTXID] = struct{}{}
+						// ancillaryTxids[*txin.SourceTXID] = struct{}{}
 
 					} else {
 						// NOW log the missing input - we confirmed it's a relevant BSV21 token
@@ -180,7 +180,7 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 }
 
 func (tm *Bsv21ValidatedTopicManager) IdentifyNeededInputs(ctx context.Context, beefBytes []byte) ([]*transaction.Outpoint, error) {
-	beef, tx, _, err := transaction.ParseBeef(beefBytes)
+	_, tx, _, err := transaction.ParseBeef(beefBytes)
 	if err != nil {
 		return nil, err
 	} else if tx == nil {
@@ -202,21 +202,27 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyNeededInputs(ctx context.Context, 
 	}
 	var inputs []*transaction.Outpoint
 	for _, txin := range tx.Inputs {
-		if inTx := beef.FindTransaction(txin.SourceTXID.String()); inTx != nil {
-			outpoint := &transaction.Outpoint{
+		// if inTx := beef.FindTransaction(txin.SourceTXID.String()); inTx != nil {
+		// 	outpoint := &transaction.Outpoint{
+		// 		Txid:  *txin.SourceTXID,
+		// 		Index: txin.SourceTxOutIndex,
+		// 	}
+		// 	script := inTx.Outputs[txin.SourceTxOutIndex].LockingScript
+		// 	if b := bsv21.Decode(script); b != nil {
+		// 		if b.Op == string(bsv21.OpMint) {
+		// 			b.Id = (outpoint).OrdinalString()
+		// 		}
+		// 		if _, exists := tokens[b.Id]; !exists {
+		// 			continue
+		// 		}
+		// 		inputs = append(inputs, outpoint)
+		// 	}
+		// }
+		if txin.SourceTransaction == nil {
+			inputs = append(inputs, &transaction.Outpoint{
 				Txid:  *txin.SourceTXID,
 				Index: txin.SourceTxOutIndex,
-			}
-			script := inTx.Outputs[txin.SourceTxOutIndex].LockingScript
-			if b := bsv21.Decode(script); b != nil {
-				if b.Op == string(bsv21.OpMint) {
-					b.Id = (outpoint).OrdinalString()
-				}
-				if _, exists := tokens[b.Id]; !exists {
-					continue
-				}
-				inputs = append(inputs, outpoint)
-			}
+			})
 		}
 	}
 	return inputs, nil
