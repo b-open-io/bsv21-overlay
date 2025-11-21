@@ -180,9 +180,9 @@ require (
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
-// replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockchain/go-overlay-services v0.1.2-0.20251119143602-4250b583a2d5
+replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockchain/go-overlay-services v0.1.2-0.20251121202406-f20b258a7dca
 
-replace github.com/bsv-blockchain/go-overlay-services => ../go-overlay-services
+// replace github.com/bsv-blockchain/go-overlay-services => ../go-overlay-services
 
 replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.2.12-0.20251119181029-d6554738622b
 
@@ -190,6 +190,6 @@ replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.
 
 replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20250909045302-0b86e7168b32
 
-// replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20251119221202-37abeee90184
+replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20251121203747-7bbf18821467
 
-replace github.com/b-open-io/overlay => ../overlay
+// replace github.com/b-open-io/overlay => ../overlay
