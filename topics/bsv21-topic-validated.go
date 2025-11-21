@@ -126,10 +126,11 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 	}
 
 	if len(summary) > 0 {
-		ancillaryTxids := make(map[chainhash.Hash]struct{})
+		ancillaryTxids := make(map[chainhash.Hash]struct{}, len(tx.Inputs))
 
 		// Single loop to process inputs and detect missing Inputs
 		for vin, txin := range tx.Inputs {
+			ancillaryTxids[*txin.SourceTXID] = struct{}{}
 			outpoint := &transaction.Outpoint{
 				Txid:  *txin.SourceTXID,
 				Index: txin.SourceTxOutIndex,
@@ -149,9 +150,6 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 						if token, ok := summary[b.Id]; ok {
 							token.tokensIn += b.Amt
 						}
-
-						// ancillaryTxids[*txin.SourceTXID] = struct{}{}
-
 					} else {
 						// NOW log the missing input - we confirmed it's a relevant BSV21 token
 						return admit, NewMissingInputError(txid, txin.SourceTXID, uint32(vin), txin.SourceTxOutIndex, "BSV21_INPUT_MISSING")
