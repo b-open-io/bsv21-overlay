@@ -165,7 +165,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
-	golang.org/x/crypto v0.44.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
@@ -181,16 +181,12 @@ require (
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
-replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockchain/go-overlay-services v1.2.3-0.20251205172032-06c93dbc1de5
+replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockchain/go-overlay-services v1.2.3-0.20251205183456-bc9c5a96ac4e
 
 // replace github.com/bsv-blockchain/go-overlay-services => ../go-overlay-services
 
-// replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.2.12-0.20251202182417-e69417a9da7d
-
-// replace github.com/bsv-blockchain/go-sdk => ../go-sdk
-
 replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20250909045302-0b86e7168b32
 
-replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20251202191246-f19bbc72b93b
+replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20251205183726-c3e2ae60b161
 
 // replace github.com/b-open-io/overlay => ../overlay
