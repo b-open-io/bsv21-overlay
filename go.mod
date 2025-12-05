@@ -7,7 +7,7 @@ require (
 	github.com/bitcoin-sv/go-templates v0.0.0-00010101000000-000000000000
 	github.com/bsv-blockchain/go-chaintracks v1.0.2
 	github.com/bsv-blockchain/go-overlay-services v0.1.1
-	github.com/bsv-blockchain/go-sdk v1.2.12
+	github.com/bsv-blockchain/go-sdk v1.2.13
 	github.com/gofiber/fiber/v2 v2.52.10
 	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.1
@@ -181,11 +181,11 @@ require (
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
-replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockchain/go-overlay-services v1.2.3-0.20251202182318-e8aa1fab5e51
+replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockchain/go-overlay-services v1.2.3-0.20251205172032-06c93dbc1de5
 
 // replace github.com/bsv-blockchain/go-overlay-services => ../go-overlay-services
 
-replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.2.12-0.20251119181029-d6554738622b
+// replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.2.12-0.20251202182417-e69417a9da7d
 
 // replace github.com/bsv-blockchain/go-sdk => ../go-sdk
 
