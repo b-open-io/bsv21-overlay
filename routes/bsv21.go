@@ -9,10 +9,10 @@ import (
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
+	"github.com/bsv-blockchain/go-chaintracks/pkg/chaintracks"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/transaction"
-	"github.com/bsv-blockchain/go-chaintracks/pkg/chaintracks"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -115,7 +115,7 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		}
 
 		// Fetch block header information from chaintracker
-		blockHeader, err := chaintracker.GetHeaderByHeight(height)
+		blockHeader, err := chaintracker.GetHeaderByHeight(c.UserContext(), height)
 		if err != nil {
 			log.Printf("Failed to get block header: %v", err)
 			// Continue without header info rather than failing completely

@@ -3,9 +3,9 @@ module github.com/b-open-io/bsv21-overlay
 go 1.25.4
 
 require (
-	github.com/b-open-io/overlay v0.3.1-0.20251205192905-9f7e5b46476e
+	github.com/b-open-io/overlay v0.3.1-0.20251205200121-14fac8e4c21c
 	github.com/bitcoin-sv/go-templates v0.0.0-00010101000000-000000000000
-	github.com/bsv-blockchain/go-chaintracks v1.0.1-0.20251205191610-8b68a1247a37
+	github.com/bsv-blockchain/go-chaintracks v1.0.1-0.20251205195428-2cf0e3b9f13a
 	github.com/bsv-blockchain/go-overlay-services v0.1.1
 	github.com/bsv-blockchain/go-sdk v1.2.13
 	github.com/gofiber/fiber/v2 v2.52.10

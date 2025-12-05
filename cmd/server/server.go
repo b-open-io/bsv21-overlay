@@ -102,6 +102,9 @@ func runServer(cmd *cobra.Command, args []string) {
 		arcURL = "https://arc.gorillapool.io/v1"
 	}
 
+	// Create a context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+
 	// Set up chain tracker - use client if CHAINTRACKS_URL is set, otherwise run locally
 	var err error
 	chaintracksURL := os.Getenv("CHAINTRACKS_URL")
@@ -111,7 +114,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	} else {
 		log.Println("Running chaintracks locally")
 		bootstrapURL := os.Getenv("BOOTSTRAP_URL")
-		chaintracker, err = chaintracks.NewChainManager(network, "~/.chaintracks", bootstrapURL)
+		chaintracker, err = chaintracks.NewChainManager(ctx, network, "~/.chaintracks", nil, bootstrapURL)
 		if err != nil {
 			log.Fatalf("Failed to initialize chain tracker: %v", err)
 		}
@@ -137,9 +140,6 @@ func runServer(cmd *cobra.Command, args []string) {
 			}
 		}()
 	}
-
-	// Create a context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize variables for cleanup
 	var store *storage.EventDataStorage
