@@ -77,10 +77,13 @@ func (tm *Bsv21ValidatedTopicManager) HasTokenId(tokenId string) bool {
 }
 
 type tokenSummary struct {
-	tokensIn  uint64
-	tokensOut uint64
-	vouts     []uint32
-	deploy    bool
+	tokensIn   uint64
+	tokensOut  uint64
+	deploy     bool
+	hasAuth    bool     // Track if this token has auth input
+	tokenVouts []uint32 // Outputs that transfer/burn tokens
+	authVouts  []uint32 // Auth outputs that need auth input
+	invalid    bool
 }
 
 func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Context, beefBytes []byte, previousCoins []uint32) (admit overlay.AdmittanceInstructions, err error) {
@@ -97,7 +100,8 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 	// First pass: identify all relevant token IDs in outputs
 	for vout, output := range tx.Outputs {
 		if b := bsv21.Decode(output.LockingScript); b != nil {
-			if b.Op == string(bsv21.OpMint) {
+			// Set ID for deploy operations
+			if b.Op == string(bsv21.OpDeployMint) || b.Op == string(bsv21.OpDeployAuth) {
 				b.Id = (&transaction.Outpoint{
 					Txid:  *txid,
 					Index: uint32(vout),
@@ -108,20 +112,27 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 			}
 			relevantTokenIds[b.Id] = struct{}{}
 
-			if b.Op == string(bsv21.OpMint) {
+			// Handle deploy operations - auto-admit
+			if b.Op == string(bsv21.OpDeployMint) || b.Op == string(bsv21.OpDeployAuth) {
 				admit.OutputsToAdmit = append(admit.OutputsToAdmit, uint32(vout))
 				continue
 			}
 
-			if token, ok := summary[b.Id]; !ok {
-				summary[b.Id] = &tokenSummary{
-					tokensOut: b.Amt,
-					vouts:     []uint32{uint32(vout)},
-				}
-			} else {
-				token.tokensOut += b.Amt
-				token.vouts = append(token.vouts, uint32(vout))
+			// Ensure token summary exists
+			if _, ok := summary[b.Id]; !ok {
+				summary[b.Id] = &tokenSummary{}
 			}
+			token := summary[b.Id]
+
+			switch b.Op {
+			case string(bsv21.OpAuth), string(bsv21.OpMint):
+				token.authVouts = append(token.authVouts, uint32(vout))
+			case string(bsv21.OpTransfer), string(bsv21.OpBurn):
+				token.tokensOut += b.Amt
+				token.tokenVouts = append(token.tokenVouts, uint32(vout))
+			}
+
+			// Handle transfer/burn outputs - require token balance validation
 		}
 	}
 
@@ -137,7 +148,7 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 			}
 			if sourceOutput := txin.SourceTxOutput(); sourceOutput != nil {
 				if b := bsv21.Decode(sourceOutput.LockingScript); b != nil {
-					if b.Op == string(bsv21.OpMint) {
+					if b.Op == string(bsv21.OpDeployMint) || b.Op == string(bsv21.OpDeployAuth) {
 						b.Id = outpoint.OrdinalString()
 					}
 					if !tm.HasTokenId(b.Id) {
@@ -147,8 +158,17 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 						// We have this input - process it
 						slog.Debug("BSV21_INPUT_FOUND", "topic", tm.topic, "txid", txid.String(), "vin", vin, "source_txid", txin.SourceTXID.String())
 						admit.CoinsToRetain = append(admit.CoinsToRetain, uint32(vin))
+
 						if token, ok := summary[b.Id]; ok {
-							token.tokensIn += b.Amt
+							// Track auth inputs
+							switch b.Op {
+							case string(bsv21.OpAuth), string(bsv21.OpDeployAuth):
+								token.hasAuth = true
+							case string(bsv21.OpTransfer), string(bsv21.OpMint), string(bsv21.OpDeployMint):
+								token.tokensIn += b.Amt
+							case string(bsv21.OpBurn):
+								token.invalid = true // Cannot burn from input
+							}
 						}
 					} else {
 						// NOW log the missing input - we confirmed it's a relevant BSV21 token
@@ -159,8 +179,15 @@ func (tm *Bsv21ValidatedTopicManager) IdentifyAdmissibleOutputs(ctx context.Cont
 		}
 
 		for _, token := range summary {
-			if token.tokensIn >= token.tokensOut {
-				admit.OutputsToAdmit = append(admit.OutputsToAdmit, token.vouts...)
+			if len(token.authVouts) > 0 {
+				if !token.hasAuth {
+					continue // Missing auth input
+				} else {
+					admit.OutputsToAdmit = append(admit.OutputsToAdmit, token.authVouts...)
+				}
+			}
+			if !token.invalid && token.tokensIn >= token.tokensOut {
+				admit.OutputsToAdmit = append(admit.OutputsToAdmit, token.tokenVouts...)
 			}
 		}
 

@@ -204,8 +204,8 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 			})
 		}
 
-		// Build event string from lockType, address, and tokenId
-		event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+		// Build event string from lockType and address
+		event := fmt.Sprintf("%s:%s", lockType, address)
 		log.Printf("Received balance request for token %s, %s address %s", tokenId, lockType, address)
 
 		// Get balance for the single event
@@ -237,8 +237,8 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 			})
 		}
 
-		// Build event string from lockType, address, and tokenId
-		event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+		// Build event string from lockType and address
+		event := fmt.Sprintf("%s:%s", lockType, address)
 		log.Printf("Received history request for token %s, %s address %s", tokenId, lockType, address)
 
 		// Parse query parameters for paging
@@ -272,8 +272,8 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 			})
 		}
 
-		// Build event string from lockType, address, and tokenId
-		event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+		// Build event string from lockType and address
+		event := fmt.Sprintf("%s:%s", lockType, address)
 		log.Printf("Received unspent request for token %s, %s address %s", tokenId, lockType, address)
 
 		// Get UTXOs for the single event using FindOutputData (now includes full data)
@@ -335,7 +335,7 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		// Build event strings for all addresses
 		events := make([]string, 0, len(addresses))
 		for _, address := range addresses {
-			event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+			event := fmt.Sprintf("%s:%s", lockType, address)
 			events = append(events, event)
 		}
 
@@ -393,7 +393,7 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		// Build event strings for all addresses
 		events := make([]string, 0, len(addresses))
 		for _, address := range addresses {
-			event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+			event := fmt.Sprintf("%s:%s", lockType, address)
 			events = append(events, event)
 		}
 
@@ -453,7 +453,7 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		// Build event strings for all addresses
 		events := make([]string, 0, len(addresses))
 		for _, address := range addresses {
-			event := fmt.Sprintf("%s:%s:%s", lockType, address, tokenId)
+			event := fmt.Sprintf("%s:%s", lockType, address)
 			events = append(events, event)
 		}
 

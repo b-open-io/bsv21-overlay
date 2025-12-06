@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,19 +47,22 @@ func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *
 	if b := bsv21.Decode(tx.Outputs[int(payload.OutputIndex)].LockingScript); b != nil {
 		events := make([]string, 0, 5)
 
-		// For mint operations, set the ID to the ordinal string
-		if b.Op == string(bsv21.OpMint) {
-			b.Id = outpoint.OrdinalString()
-			if b.Symbol != nil {
-				events = append(events, fmt.Sprintf("sym:%s", *b.Symbol))
-			}
-		} else if b.Op == string(bsv21.OpTransfer) {
-			// For transfers, get the mint token data (uses cache internally)
+		// Handle deploy and non-deploy operations
+		switch b.Op {
+		case string(bsv21.OpDeployMint), string(bsv21.OpDeployAuth):
+			ops := strings.Split(b.Op, "+")
+			events = append(events, ops[0], ops[1])
+		default:
+			events = append(events, b.Op)
+		}
+
+		// For non-deploy operations, get the mint token data to copy metadata
+		if b.Op != string(bsv21.OpDeployMint) && b.Op != string(bsv21.OpDeployAuth) {
 			tokenOutpoint, err := transaction.OutpointFromString(b.Id)
 			if err == nil {
 				mintData, err := l.GetToken(ctx, tokenOutpoint)
 				if err == nil {
-					// Copy mint token fields to the transfer
+					// Copy mint token fields
 					if sym, ok := mintData["sym"].(string); ok {
 						b.Symbol = &sym
 					}
@@ -74,27 +78,26 @@ func (l *Bsv21EventsLookup) OutputAdmittedByTopic(ctx context.Context, payload *
 				}
 			}
 		}
-		events = append(events, fmt.Sprintf("id:%s", b.Id))
 
 		// Extract the address from the suffix script
 		var address string
 		suffix := script.NewFromBytes(b.Insc.ScriptSuffix)
 		if p := p2pkh.Decode(suffix, true); p != nil {
 			address = p.AddressString
-			events = append(events, fmt.Sprintf("p2pkh:%s:%s", address, b.Id))
+			events = append(events, fmt.Sprintf("p2pkh:%s", address))
 		} else if c := cosign.Decode(suffix); c != nil {
 			address = c.Address
-			events = append(events, fmt.Sprintf("cos:%s:%s", address, b.Id))
+			events = append(events, fmt.Sprintf("cos:%s", address))
 		} else if ltm := ltm.Decode(suffix); ltm != nil {
-			events = append(events, fmt.Sprintf("ltm:%s", b.Id))
+			events = append(events, "ltm")
 		} else if pow20 := pow20.Decode(suffix); pow20 != nil {
-			events = append(events, fmt.Sprintf("pow20:%s", b.Id))
+			events = append(events, "pow20")
 		} else if ordLock := ordlock.Decode(suffix); ordLock != nil {
 			if ordLock.Seller != nil {
 				address = ordLock.Seller.AddressString
-				events = append(events, fmt.Sprintf("list:%s:%s", address, b.Id))
+				events = append(events, fmt.Sprintf("list:%s", address))
 			}
-			events = append(events, fmt.Sprintf("list:%s", b.Id))
+			events = append(events, "list")
 		}
 
 		// Create a clean data structure that matches the go-templates structure
