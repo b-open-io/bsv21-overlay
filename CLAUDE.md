@@ -100,6 +100,12 @@ HOSTING_URL=http://localhost:3000
 HEADERS_URL=https://api.whatsonchain.com/v1/bsv/main/block
 HEADERS_KEY=your_api_key
 
+# Chain Tracker Configuration (optional)
+# Use a remote chaintracks server instead of running locally
+CHAINTRACKS_URL=http://chaintracks.example.com:8080
+# Bootstrap URL for local chaintracks initialization (only used when CHAINTRACKS_URL is not set)
+BOOTSTRAP_URL=http://bootstrap.example.com/headers
+
 # Optional: Peer synchronization
 PEERS=http://peer1:3000,http://peer2:3000
 JUNGLEBUS=https://texas1.junglebus.gorillapool.io
