@@ -31,8 +31,7 @@ tm_ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0
 
 ```json
 {
-  "description": "Overlay engine successfully processed the submitted transaction",
-  "steak": {
+  "STEAK": {
     "tm_ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0": {
       "outputsToAdmit": [0, 1],
       "coinsToRetain": [],
@@ -50,21 +49,45 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 )
 
-func submitTransaction(tx *transaction.Transaction, tokenId string) error {
-	// Serialize to BEEF format
+// ResolveTxBeef recursively loads source transactions to build a complete BEEF.
+// If the transaction has a MerklePath (is mined), it's already provable.
+// Otherwise, each input's SourceTransaction must be populated.
+func ResolveTxBeef(ctx context.Context, txid string) (*transaction.Transaction, error) {
+	tx, err := LoadTx(ctx, txid) // Your function to load a transaction
+	if err != nil {
+		return nil, err
+	}
+
+	if tx.MerklePath != nil {
+		return tx, nil // Already has proof, no ancestors needed
+	}
+
+	for _, input := range tx.Inputs {
+		if input.SourceTransaction == nil {
+			input.SourceTransaction, err = ResolveTxBeef(ctx, input.SourceTXID.String())
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return tx, nil
+}
+
+// SubmitTransaction serializes a transaction to BEEF and submits it to the overlay.
+func SubmitTransaction(ctx context.Context, tx *transaction.Transaction, tokenId string) error {
 	beef, err := tx.BEEF()
 	if err != nil {
 		return fmt.Errorf("failed to serialize BEEF: %w", err)
 	}
 
-	// Create request
-	req, err := http.NewRequest("POST", "https://overlay.example.com/api/v1/submit", bytes.NewReader(beef))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://overlay.example.com/api/v1/submit", bytes.NewReader(beef))
 	if err != nil {
 		return err
 	}
@@ -72,7 +95,6 @@ func submitTransaction(tx *transaction.Transaction, tokenId string) error {
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("x-topics", "tm_"+tokenId)
 
-	// Send request
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -85,18 +107,4 @@ func submitTransaction(tx *transaction.Transaction, tokenId string) error {
 
 	return nil
 }
-```
-
-## Building a Transaction with BEEF
-
-For the `tx.BEEF()` call to succeed, each input must have its `SourceTransaction` populated with the parent transaction (which itself must have either a `MerklePath` or its own `SourceTransaction` chain back to confirmed ancestors).
-
-```go
-// Each input needs its source transaction
-for _, input := range tx.Inputs {
-	input.SourceTransaction = parentTx // Must have MerklePath or its own ancestors
-}
-
-// Now BEEF() can build the complete ancestry
-beef, err := tx.BEEF()
 ```
