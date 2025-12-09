@@ -9,7 +9,7 @@ import (
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
-	"github.com/bsv-blockchain/go-chaintracks/pkg/chaintracks"
+	"github.com/bsv-blockchain/arcade"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/transaction"
@@ -19,7 +19,7 @@ import (
 // BSV21RoutesConfig holds the configuration for BSV21-specific routes
 type BSV21RoutesConfig struct {
 	Storage      *storage.EventDataStorage
-	ChainTracker chaintracks.Chaintracks
+	ChainTracker arcade.Chaintracks
 	Engine       *engine.Engine
 	BSV21Lookup  *lookups.Bsv21EventsLookup
 }

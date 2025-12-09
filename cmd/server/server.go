@@ -23,7 +23,8 @@ import (
 	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/b-open-io/overlay/sync"
-	"github.com/bsv-blockchain/go-chaintracks/pkg/chaintracks"
+	"github.com/bsv-blockchain/arcade"
+	"github.com/bsv-blockchain/arcade/chaintracks"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
 	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
@@ -35,7 +36,7 @@ import (
 
 // Global variables
 var (
-	chaintracker      chaintracks.Chaintracks
+	chaintracker      arcade.Chaintracks
 	broadcast         *broadcaster.Arc
 	PORT              int
 	PPROF_PORT        string
@@ -109,12 +110,15 @@ func runServer(cmd *cobra.Command, args []string) {
 	var err error
 	chaintracksURL := os.Getenv("CHAINTRACKS_URL")
 	if chaintracksURL != "" {
-		log.Printf("Using remote chaintracks server at %s", chaintracksURL)
+		log.Printf("Using remote arcade server at %s", chaintracksURL)
 		chaintracker = chaintracks.NewClient(chaintracksURL)
 	} else {
-		log.Println("Running chaintracks locally")
+		log.Println("Running arcade locally")
 		bootstrapURL := os.Getenv("BOOTSTRAP_URL")
-		chaintracker, err = chaintracks.NewChainManager(ctx, network, "~/.chaintracks", nil, bootstrapURL)
+		chaintracker, err = arcade.NewArcade(ctx, arcade.Config{
+			Network:      network,
+			BootstrapURL: bootstrapURL,
+		})
 		if err != nil {
 			log.Fatalf("Failed to initialize chain tracker: %v", err)
 		}
@@ -203,11 +207,15 @@ func runServer(cmd *cobra.Command, args []string) {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
 
-	// Start chain tracker P2P and get channel for new block notifications
-	blockChan, err := chaintracker.Start(ctx)
-	if err != nil {
-		log.Fatalf("Failed to start chain tracker: %v", err)
+	// Start chain tracker P2P if running locally (Arcade implementation)
+	if arcadeInstance, ok := chaintracker.(*arcade.Arcade); ok {
+		if err := arcadeInstance.Start(ctx); err != nil {
+			log.Fatalf("Failed to start chain tracker: %v", err)
+		}
 	}
+
+	// Subscribe to new block notifications
+	blockChan := chaintracker.SubscribeTip(ctx)
 
 	// Start block processor to handle new blocks from P2P
 	go func() {
@@ -465,9 +473,11 @@ func runServer(cmd *cobra.Command, args []string) {
 	// Wait for context cancellation
 	<-ctx.Done()
 
-	// Stop chain tracker P2P
-	if err := chaintracker.Stop(); err != nil {
-		log.Printf("Error stopping chain tracker: %v", err)
+	// Stop chain tracker P2P if running locally (Arcade implementation)
+	if arcadeInstance, ok := chaintracker.(*arcade.Arcade); ok {
+		if err := arcadeInstance.Stop(); err != nil {
+			log.Printf("Error stopping chain tracker: %v", err)
+		}
 	}
 
 	// Shutdown the server
