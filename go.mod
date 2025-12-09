@@ -197,8 +197,8 @@ replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockcha
 
 replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20250909045302-0b86e7168b32
 
-replace github.com/bsv-blockchain/arcade => github.com/bsv-blockchain/arcade v0.0.0-20251209211154-5ef974a4817b
+replace github.com/bsv-blockchain/arcade => github.com/bsv-blockchain/arcade v0.0.0-20251209225635-81fbab23d6ce
 
-replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20251209220919-843cbb163314
+replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20251209225820-af99228de5c9
 
 replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.2.13-0.20251209215739-b6f7f75a3d9d
