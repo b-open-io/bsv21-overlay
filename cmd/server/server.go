@@ -112,6 +112,9 @@ func runServer(cmd *cobra.Command, args []string) {
 	if chaintracksURL != "" {
 		log.Printf("Using remote arcade server at %s", chaintracksURL)
 		chaintracker = chaintracks.NewClient(chaintracksURL)
+		// Start SSE subscription immediately so GetTip() has cached data
+		// The SSE endpoint sends the current tip on connection
+		chaintracker.SubscribeTip(ctx)
 	} else {
 		log.Println("Running arcade locally")
 		bootstrapURL := os.Getenv("BOOTSTRAP_URL")
