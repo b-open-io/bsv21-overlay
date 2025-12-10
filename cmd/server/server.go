@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -60,6 +62,7 @@ var (
 	arcToken   string
 	hostingURL string
 	network    string
+	logLevel   string
 )
 
 // Command exports the server command for use in the main CLI
@@ -92,9 +95,24 @@ func init() {
 	Command.Flags().StringVar(&arcToken, "arc-token", os.Getenv("ARC_CALLBACK_TOKEN"), "Arc callback token")
 	Command.Flags().StringVar(&hostingURL, "hosting", os.Getenv("HOSTING_URL"), "Hosting URL")
 	Command.Flags().StringVar(&network, "network", os.Getenv("NETWORK"), "Network (mainnet, testnet, teratestnet)")
+	Command.Flags().StringVar(&logLevel, "loglevel", os.Getenv("LOG_LEVEL"), "Log level (debug, info, warn, error)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
+	// Configure log level
+	var slogLevel slog.Level
+	switch strings.ToLower(logLevel) {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "warn", "warning":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	default:
+		slogLevel = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel})))
+
 	// Apply defaults
 	if PORT == 0 {
 		PORT = 3000
