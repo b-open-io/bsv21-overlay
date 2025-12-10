@@ -191,14 +191,14 @@ require (
 	modernc.org/sqlite v1.40.0 // indirect
 )
 
-// replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockchain/go-overlay-services v1.2.3-0.20251205183456-bc9c5a96ac4e
+replace github.com/bsv-blockchain/go-overlay-services => github.com/bsv-blockchain/go-overlay-services v1.2.3-0.20251210010030-7861199ab824
 
-replace github.com/bsv-blockchain/go-overlay-services => ../go-overlay-services
+// replace github.com/bsv-blockchain/go-overlay-services => ../go-overlay-services
 
 replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20250909045302-0b86e7168b32
 
 replace github.com/bsv-blockchain/arcade => github.com/bsv-blockchain/arcade v0.0.0-20251209225635-81fbab23d6ce
 
-replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20251209225820-af99228de5c9
+replace github.com/b-open-io/overlay => github.com/b-open-io/overlay v0.3.1-0.20251210010148-65dec0e7cfc0
 
 replace github.com/bsv-blockchain/go-sdk => github.com/bsv-blockchain/go-sdk v1.2.13-0.20251209215739-b6f7f75a3d9d
