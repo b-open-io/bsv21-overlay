@@ -86,8 +86,6 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		tokenId := c.Params("tokenId")
 		heightStr := c.Params("height")
 
-		log.Printf("Received block request for BSV21 tokenId: %s at height: %s", tokenId, heightStr)
-
 		// Validate tokenId is active
 		topic := "tm_" + tokenId
 		if _, exists := eng.Managers[topic]; !exists {
