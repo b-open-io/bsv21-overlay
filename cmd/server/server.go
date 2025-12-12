@@ -22,6 +22,7 @@ import (
 	"github.com/b-open-io/overlay/beef"
 	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/pubsub"
+	"github.com/b-open-io/overlay/queue"
 	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/b-open-io/overlay/sync"
@@ -452,10 +453,14 @@ func runServer(cmd *cobra.Command, args []string) {
 		Engine:       e,
 	})
 
-	// Register SSE streaming routes
+	// Create SSE manager for streaming
+	sseManager := pubsub.NewSSEManager(ctx, store.GetPubSub())
+
+	// Register SSE streaming routes with BSV21-specific catchup
 	routes.RegisterSSERoutes(onesat, &routes.SSERoutesConfig{
-		Storage: store,
-		Context: ctx,
+		SSEManager: sseManager,
+		Catchup:    createBSV21Catchup(store),
+		Context:    ctx,
 	})
 
 	// Register BSV21-specific routes
@@ -505,5 +510,78 @@ func runServer(cmd *cobra.Command, args []string) {
 	log.Println("Shutting down HTTP server...")
 	if err := app.Shutdown(); err != nil {
 		log.Printf("Server shutdown error: %v", err)
+	}
+}
+
+// createBSV21Catchup returns a catchup function that merges events from multiple keys
+// using cursor-based iteration to maintain score order without sorting.
+func createBSV21Catchup(store *storage.EventDataStorage) routes.CatchupFunc {
+	return func(ctx context.Context, events []string, fromScore float64) ([]queue.ScoredMember, error) {
+		// Build list of (topic, event) pairs
+		type topicEvent struct {
+			topic string
+			event string
+		}
+		pairs := make([]topicEvent, 0, len(events))
+		for _, event := range events {
+			var topic string
+			if strings.HasPrefix(event, "tm_") {
+				topic = event
+			} else {
+				parts := strings.Split(event, ":")
+				if len(parts) >= 3 {
+					tokenId := parts[len(parts)-1]
+					topic = "tm_" + tokenId
+				} else {
+					continue
+				}
+			}
+			pairs = append(pairs, topicEvent{topic: topic, event: event})
+		}
+
+		if len(pairs) == 0 {
+			return nil, nil
+		}
+
+		// Initialize cursors for each event
+		type cursor struct {
+			members []queue.ScoredMember
+			pos     int
+			pair    topicEvent
+		}
+		cursors := make([]*cursor, len(pairs))
+		for i, pair := range pairs {
+			members, err := store.LookupEventScores(ctx, pair.topic, pair.event, fromScore)
+			if err != nil {
+				log.Printf("Catchup lookup error for %s: %v", pair.event, err)
+				members = nil
+			}
+			cursors[i] = &cursor{members: members, pos: 0, pair: pair}
+		}
+
+		// Merge using cursor-based iteration
+		var result []queue.ScoredMember
+		for {
+			// Find cursor with lowest score
+			var best *cursor
+			var bestScore float64
+			for _, c := range cursors {
+				if c.pos >= len(c.members) {
+					continue
+				}
+				score := c.members[c.pos].Score
+				if best == nil || score < bestScore {
+					best = c
+					bestScore = score
+				}
+			}
+			if best == nil {
+				break // All cursors exhausted
+			}
+			result = append(result, best.members[best.pos])
+			best.pos++
+		}
+
+		return result, nil
 	}
 }
