@@ -8,7 +8,8 @@ import (
 	"os"
 
 	"github.com/b-open-io/bsv21-overlay/constants"
-	overlayConfig "github.com/b-open-io/overlay/config"
+	"github.com/b-open-io/overlay/pubsub"
+	"github.com/b-open-io/overlay/queue"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/joho/godotenv"
 	"bsv21-config-ui/config"
@@ -34,19 +35,28 @@ func (a *App) startup(ctx context.Context) {
 	godotenv.Load("../.env")
 	
 	// Create storage using the same configuration as server
-	storage, err := overlayConfig.CreateEventStorage(
-		os.Getenv("EVENTS_URL"),
-		os.Getenv("BEEF_URL"),
-		os.Getenv("QUEUE_URL"),
-		os.Getenv("PUBSUB_URL"),
-		nil, // chaintracker is optional for config UI
-	)
+	queueURL := os.Getenv("QUEUE_URL")
+	if queueURL == "" {
+		queueURL = "badger:///tmp/queue"
+	}
+	queueStorage, err := queue.NewBadgerQueueStorage(queueURL, nil)
 	if err != nil {
-		log.Printf("Failed to create storage: %v", err)
+		log.Printf("Failed to create queue storage: %v", err)
 		return
 	}
-	
-	a.storage = storage
+
+	pubsubURL := os.Getenv("PUBSUB_URL")
+	if pubsubURL == "" {
+		pubsubURL = "channels://"
+	}
+	ps, err := pubsub.CreatePubSub(pubsubURL)
+	if err != nil {
+		log.Printf("Failed to create pubsub: %v", err)
+		return
+	}
+
+	// Config UI doesn't need beef storage
+	a.storage = storage.CreateEventDataStorage(queueStorage, ps, nil)
 	log.Printf("Connected to storage successfully")
 }
 

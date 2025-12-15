@@ -14,7 +14,7 @@ import (
 func LoadConfigFromStorage(ctx context.Context, store *storage.EventDataStorage, tokenId string) (map[string]PeerSettings, error) {
 	queueStore := store.GetQueueStorage()
 	key := constants.PeerConfigKeyPrefix + tokenId
-	peerData, err := queueStore.HGetAll(ctx, key)
+	peerData, err := queueStore.HGetAll(ctx, []byte(key))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get peer config for token %s: %v", tokenId, err)
 	}

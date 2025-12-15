@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
+	"strings"
 
+	"github.com/b-open-io/bsv21-overlay/config"
 	"github.com/b-open-io/bsv21-overlay/constants"
-	"github.com/b-open-io/overlay/beef"
-	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/queue"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 type PeerSettings struct {
@@ -21,12 +21,8 @@ type PeerSettings struct {
 	Broadcast bool `json:"broadcast"`
 }
 
+// CLI flags for config commands (these are operation-specific, not from config file)
 var (
-	// Config command flags
-	eventsURL     string
-	beefURL       string
-	queueURL      string
-	pubsubURL     string
 	tokenID       string
 	peerURL       string
 	sseFlag       bool
@@ -94,14 +90,10 @@ var peerGetCmd = &cobra.Command{
 }
 
 func init() {
-	// Load .env file
+	// Load .env file for backward compatibility
 	godotenv.Load(".env")
 
-	// Define config command flags with env var defaults
-	Command.PersistentFlags().StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
-	Command.PersistentFlags().StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
-	Command.PersistentFlags().StringVar(&queueURL, "queue", os.Getenv("QUEUE_URL"), "Queue storage URL")
-	Command.PersistentFlags().StringVar(&pubsubURL, "pubsub", os.Getenv("PUBSUB_URL"), "PubSub URL")
+	// Define CLI flags for operation-specific parameters (not from config file)
 	Command.PersistentFlags().StringVar(&tokenID, "token", "", "Token ID")
 	Command.PersistentFlags().StringVar(&peerURL, "peer", "", "Peer URL")
 	Command.PersistentFlags().BoolVar(&sseFlag, "sse", false, "Enable SSE")
@@ -116,16 +108,56 @@ func init() {
 	peerCmd.AddCommand(peerAddCmd, peerRemoveCmd, peerListCmd, peerGetCmd)
 }
 
-func getQueueStorage() (queue.QueueStorage, error) {
-	// Create storage using the same configuration as server
-	// Config tool doesn't need headers client since it only manages queue storage
-	if beefStore, err := beef.NewStorage(beefURL, nil); err != nil {
-		return nil, fmt.Errorf("failed to create beef storage: %v", err)
-	} else if store, err := config.CreateEventStorage(eventsURL, beefStore, queueURL, pubsubURL, nil); err != nil {
-		return nil, fmt.Errorf("failed to create storage: %v", err)
-	} else {
-		return store.GetQueueStorage(), nil
+// Load reads configuration from file and environment variables.
+func Load() (*config.Config, error) {
+	v := viper.New()
+
+	cfg := &config.Config{}
+	cfg.SetDefaults(v, "")
+
+	// Config file settings
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+	v.AddConfigPath(".")
+	v.AddConfigPath("$HOME/.bsv21")
+	v.AddConfigPath("/etc/bsv21")
+
+	// Environment variable settings
+	v.SetEnvPrefix("BSV21")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	// Read config file (optional - env vars can provide everything)
+	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return nil, err
+		}
 	}
+
+	if err := v.Unmarshal(cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func getQueueStorage() (queue.QueueStorage, error) {
+	cfg, err := Load()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Config tool only needs queue storage for whitelist/peer management
+	queueURL := cfg.Queue.URL
+	if queueURL == "" {
+		queueURL = "badger:///tmp/queue"
+	}
+	queueStorage, err := queue.NewBadgerQueueStorage(queueURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create queue storage: %w", err)
+	}
+
+	return queueStorage, nil
 }
 
 func runWhitelistAdd(cmd *cobra.Command, args []string) error {
@@ -139,8 +171,8 @@ func runWhitelistAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	if err := queueStore.SAdd(ctx, constants.KeyWhitelist, tokenID); err != nil {
-		return fmt.Errorf("failed to add token to whitelist: %v", err)
+	if err := queueStore.SAdd(ctx, []byte(constants.KeyWhitelist), []byte(tokenID)); err != nil {
+		return fmt.Errorf("failed to add token to whitelist: %w", err)
 	}
 
 	fmt.Printf("Added token %s to whitelist\n", tokenID)
@@ -158,8 +190,8 @@ func runWhitelistRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	if err := queueStore.SRem(ctx, constants.KeyWhitelist, tokenID); err != nil {
-		return fmt.Errorf("failed to remove token from whitelist: %v", err)
+	if err := queueStore.SRem(ctx, []byte(constants.KeyWhitelist), []byte(tokenID)); err != nil {
+		return fmt.Errorf("failed to remove token from whitelist: %w", err)
 	}
 
 	fmt.Printf("Removed token %s from whitelist\n", tokenID)
@@ -173,9 +205,9 @@ func runWhitelistList(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	tokens, err := queueStore.SMembers(ctx, constants.KeyWhitelist)
+	tokens, err := queueStore.SMembers(ctx, []byte(constants.KeyWhitelist))
 	if err != nil {
-		return fmt.Errorf("failed to get whitelist: %v", err)
+		return fmt.Errorf("failed to get whitelist: %w", err)
 	}
 
 	if len(tokens) == 0 {
@@ -209,11 +241,11 @@ func runPeerAdd(cmd *cobra.Command, args []string) error {
 
 	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
-		return fmt.Errorf("failed to marshal settings: %v", err)
+		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
-	if err := queueStore.HSet(ctx, key, peerURL, string(settingsJSON)); err != nil {
-		return fmt.Errorf("failed to add peer: %v", err)
+	if err := queueStore.HSet(ctx, []byte(key), []byte(peerURL), settingsJSON); err != nil {
+		return fmt.Errorf("failed to add peer: %w", err)
 	}
 
 	fmt.Printf("Added peer %s for token %s with settings: SSE=%t, GASP=%t, Broadcast=%t\n",
@@ -233,8 +265,8 @@ func runPeerRemove(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 	key := constants.PeerConfigKeyPrefix + tokenID
-	if err := queueStore.HDel(ctx, key, peerURL); err != nil {
-		return fmt.Errorf("failed to remove peer: %v", err)
+	if err := queueStore.HDel(ctx, []byte(key), []byte(peerURL)); err != nil {
+		return fmt.Errorf("failed to remove peer: %w", err)
 	}
 
 	fmt.Printf("Removed peer %s for token %s\n", peerURL, tokenID)
@@ -253,9 +285,9 @@ func runPeerList(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 	key := constants.PeerConfigKeyPrefix + tokenID
-	peerData, err := queueStore.HGetAll(ctx, key)
+	peerData, err := queueStore.HGetAll(ctx, []byte(key))
 	if err != nil {
-		return fmt.Errorf("failed to get peer config: %v", err)
+		return fmt.Errorf("failed to get peer config: %w", err)
 	}
 
 	if len(peerData) == 0 {
@@ -287,17 +319,17 @@ func runPeerGet(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 	key := constants.PeerConfigKeyPrefix + tokenID
-	settingsJSON, err := queueStore.HGet(ctx, key, peerURL)
+	settingsJSON, err := queueStore.HGet(ctx, []byte(key), []byte(peerURL))
 	if err != nil && err.Error() == "redis: nil" {
 		fmt.Printf("Peer %s not found for token %s\n", peerURL, tokenID)
 		return nil
 	} else if err != nil {
-		return fmt.Errorf("failed to get peer config: %v", err)
+		return fmt.Errorf("failed to get peer config: %w", err)
 	}
 
 	var settings PeerSettings
 	if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
-		return fmt.Errorf("failed to parse settings: %v", err)
+		return fmt.Errorf("failed to parse settings: %w", err)
 	}
 
 	fmt.Printf("Peer %s for token %s: SSE=%t, GASP=%t, Broadcast=%t\n",

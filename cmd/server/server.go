@@ -9,7 +9,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -18,52 +17,42 @@ import (
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/bsv21-overlay/peer"
 	bsv21routes "github.com/b-open-io/bsv21-overlay/routes"
-	"github.com/b-open-io/bsv21-overlay/topics"
-	"github.com/b-open-io/overlay/beef"
-	"github.com/b-open-io/overlay/config"
+	bsv21topics "github.com/b-open-io/bsv21-overlay/topics"
 	"github.com/b-open-io/overlay/pubsub"
 	"github.com/b-open-io/overlay/queue"
 	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/b-open-io/overlay/sync"
-	"github.com/bsv-blockchain/arcade"
-	"github.com/bsv-blockchain/arcade/chaintracks"
+	"github.com/b-open-io/overlay/topics"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
-	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 )
 
-// Global variables
+const (
+	// GASPRestartInterval is how long to wait before restarting GASP sync
+	GASPRestartInterval = 5 * time.Minute
+	// TopicUpdateInterval is how often to update topic registrations
+	TopicUpdateInterval = 30 * time.Second
+)
+
+// CLI-only flags (not from config file/env)
 var (
-	chaintracker      arcade.Chaintracks
-	broadcast         *broadcaster.Arc
-	PORT              int
-	PPROF_PORT        string
-	SYNC              bool
-	LIBP2P_SYNC       bool
+	syncFlag      bool
+	pprofPortFlag string
+	libp2pFlag    bool
+)
+
+// Runtime state
+var (
 	sseSyncManager    *sync.SSESyncManager
 	libp2pSyncManager *sync.LibP2PSyncManager
 	libp2pSync        *pubsub.LibP2PSync
 	peerBroadcaster   *pubsub.PeerBroadcaster
 	e                 *engine.Engine
-)
-
-// Configuration from flags/env
-var (
-	eventsURL  string
-	beefURL    string
-	queueURL   string
-	pubsubURL  string
-	arcURL     string
-	arcAPIKey  string
-	arcToken   string
-	hostingURL string
-	network    string
-	logLevel   string
 )
 
 // Command exports the server command for use in the main CLI
@@ -76,33 +65,33 @@ and integrated transaction processing for BSV-21 tokens.`,
 }
 
 func init() {
-	// Load .env file
+	// Load .env file for backward compatibility
 	godotenv.Load(".env")
 
-	// Parse PORT from env before flags
-	PORT, _ = strconv.Atoi(os.Getenv("PORT"))
-
-	// Define server command flags with env var defaults
-	Command.Flags().IntVarP(&PORT, "port", "p", PORT, "Port to listen on")
-	Command.Flags().StringVar(&PPROF_PORT, "pprof", "", "pprof HTTP server port (empty to disable)")
-	Command.Flags().BoolVarP(&SYNC, "sync", "s", false, "Start sync")
-	Command.Flags().BoolVar(&LIBP2P_SYNC, "p2p", os.Getenv("LIBP2P_SYNC") == "true", "Enable LibP2P sync")
-	Command.Flags().StringVar(&eventsURL, "events", os.Getenv("EVENTS_URL"), "Event storage URL")
-	Command.Flags().StringVar(&beefURL, "beef", os.Getenv("BEEF_URL"), "BEEF storage URL")
-	Command.Flags().StringVar(&queueURL, "queue", os.Getenv("QUEUE_URL"), "Queue storage URL")
-	Command.Flags().StringVar(&pubsubURL, "pubsub", os.Getenv("PUBSUB_URL"), "PubSub URL")
-	Command.Flags().StringVar(&arcURL, "arc-url", os.Getenv("ARC_URL"), "Arc broadcaster URL")
-	Command.Flags().StringVar(&arcAPIKey, "arc-key", os.Getenv("ARC_API_KEY"), "Arc API key")
-	Command.Flags().StringVar(&arcToken, "arc-token", os.Getenv("ARC_CALLBACK_TOKEN"), "Arc callback token")
-	Command.Flags().StringVar(&hostingURL, "hosting", os.Getenv("HOSTING_URL"), "Hosting URL")
-	Command.Flags().StringVar(&network, "network", os.Getenv("NETWORK"), "Network (mainnet, testnet, teratestnet)")
-	Command.Flags().StringVar(&logLevel, "loglevel", os.Getenv("LOG_LEVEL"), "Log level (debug, info, warn, error)")
+	// Define CLI-only flags (not from config file)
+	Command.Flags().BoolVarP(&syncFlag, "sync", "s", false, "Start sync")
+	Command.Flags().StringVar(&pprofPortFlag, "pprof", "", "pprof HTTP server port (empty to disable)")
+	Command.Flags().BoolVar(&libp2pFlag, "p2p", false, "Enable LibP2P sync")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
+	// Load configuration
+	cfg, err := Load()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	// Override config with CLI flags if provided
+	if pprofPortFlag != "" {
+		cfg.Server.PProfPort = pprofPortFlag
+	}
+	if cmd.Flags().Changed("p2p") {
+		cfg.Sync.LibP2P = libp2pFlag
+	}
+
 	// Configure log level
 	var slogLevel slog.Level
-	switch strings.ToLower(logLevel) {
+	switch strings.ToLower(cfg.LogLevel) {
 	case "debug":
 		slogLevel = slog.LevelDebug
 	case "warn", "warning":
@@ -112,64 +101,28 @@ func runServer(cmd *cobra.Command, args []string) {
 	default:
 		slogLevel = slog.LevelInfo
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel})))
-
-	// Apply defaults
-	if PORT == 0 {
-		PORT = 3000
-	}
-	if arcURL == "" {
-		arcURL = "https://arc.gorillapool.io/v1"
-	}
+	slogLogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel}))
+	slog.SetDefault(slogLogger)
 
 	// Create a context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Set up chain tracker - use client if CHAINTRACKS_URL is set, otherwise run locally
-	var err error
-	chaintracksURL := os.Getenv("CHAINTRACKS_URL")
-	if chaintracksURL != "" {
-		log.Printf("Using remote arcade server at %s", chaintracksURL)
-		chaintracker = chaintracks.NewClient(chaintracksURL)
-		// Start SSE subscription immediately so GetTip() has cached data
-		// The SSE endpoint sends the current tip on connection
-		chaintracker.SubscribeTip(ctx)
-	} else {
-		log.Println("Running arcade locally")
-		bootstrapURL := os.Getenv("BOOTSTRAP_URL")
-		chaintracker, err = arcade.NewArcade(ctx, arcade.Config{
-			Network:      network,
-			BootstrapURL: bootstrapURL,
-		})
-		if err != nil {
-			log.Fatalf("Failed to initialize chain tracker: %v", err)
-		}
-	}
-
-	broadcast = &broadcaster.Arc{
-		ApiUrl:        arcURL,
-		ApiKey:        arcAPIKey,
-		CallbackToken: &arcToken,
-		WaitFor:       broadcaster.ACCEPTED_BY_NETWORK,
-	}
-	if hostingURL != "" {
-		url := fmt.Sprintf("%s/api/v1/arc-ingest", hostingURL)
-		broadcast.CallbackUrl = &url
-	}
-
 	// Start pprof server if enabled
-	if PPROF_PORT != "" {
+	if cfg.Server.PProfPort != "" {
 		go func() {
-			log.Printf("Starting pprof server on port %s", PPROF_PORT)
-			if err := http.ListenAndServe(":"+PPROF_PORT, nil); err != nil {
+			log.Printf("Starting pprof server on port %s", cfg.Server.PProfPort)
+			if err := http.ListenAndServe(":"+cfg.Server.PProfPort, nil); err != nil {
 				log.Printf("pprof server failed: %v", err)
 			}
 		}()
 	}
 
-	// Initialize variables for cleanup
-	var store *storage.EventDataStorage
-	var bsv21Lookup *lookups.Bsv21EventsLookup
+	// Initialize services
+	log.Println("Initializing services...")
+	services, err := cfg.Initialize(ctx, slogLogger, nil)
+	if err != nil {
+		log.Fatalf("Failed to initialize services: %v", err)
+	}
 
 	// Setup cleanup function
 	cleanup := func() {
@@ -186,18 +139,8 @@ func runServer(cmd *cobra.Command, args []string) {
 			libp2pSyncManager.Stop()
 		}
 
-		// Close pub/sub (handled by storage layer)
-		if store != nil {
-			if pubsub := store.GetPubSub(); pubsub != nil {
-				pubsub.Close()
-			}
-		}
-
-		// Close storage and lookup services
-		// Note: EventDataStorage interface doesn't define Close()
-		// Individual implementations (Redis, SQLite) may have Close methods
-		// but we can't call them through the interface
-		// BSV21 lookup doesn't need closing - storage is closed separately
+		// Close services
+		services.Close()
 
 		log.Println("Cleanup complete")
 	}
@@ -213,31 +156,19 @@ func runServer(cmd *cobra.Command, args []string) {
 		os.Exit(0)
 	}()
 
-	// Create storage using the cleaned up configuration with chaintracker for validation
-	beefStore, err := beef.NewStorage(beefURL, nil)
-	if err != nil {
-		log.Fatalf("failed to create beef storage: %v", err)
-	}
-	store, err = config.CreateEventStorage(eventsURL, beefStore, queueURL, pubsubURL, chaintracker)
-	if err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
-	}
-
 	// Initialize BSV21 lookup service
-	bsv21Lookup, err = lookups.NewBsv21EventsLookup(store)
+	bsv21Lookup, err := lookups.NewBsv21EventsLookup(services.Store)
 	if err != nil {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
 
-	// Start chain tracker P2P if running locally (Arcade implementation)
-	if arcadeInstance, ok := chaintracker.(*arcade.Arcade); ok {
-		if err := arcadeInstance.Start(ctx); err != nil {
-			log.Fatalf("Failed to start chain tracker: %v", err)
-		}
-	}
+	// Create ActiveTopics cache for topic validation
+	activeTopics := topics.NewActiveTopics()
+	activeTopics.Start(ctx, services.Store.GetQueueStorage())
 
 	// Subscribe to new block notifications
-	blockChan := chaintracker.SubscribeTip(ctx)
+	// Note: ChainManager starts P2P subscription automatically during initialization
+	blockChan := services.Chaintracks.Subscribe(ctx)
 
 	// Start block processor to handle new blocks from P2P
 	go func() {
@@ -256,7 +187,7 @@ func runServer(cmd *cobra.Command, args []string) {
 				log.Printf("New block received: height=%d hash=%s", blockHeader.Height, blockHeader.Hash.String())
 
 				// Reconcile validated merkle roots for this new block
-				if err := store.ReconcileValidatedMerkleRoots(ctx); err != nil {
+				if err := services.Store.ReconcileValidatedMerkleRoots(ctx); err != nil {
 					log.Printf("Error reconciling validated outputs: %v", err)
 				}
 			}
@@ -270,14 +201,14 @@ func runServer(cmd *cobra.Command, args []string) {
 			"ls_bsv21": bsv21Lookup,
 		},
 		SyncConfiguration: map[string]engine.SyncConfiguration{},
-		Broadcaster:       broadcast,
-		HostingURL:        hostingURL,
-		Storage:           store,
-		ChainTracker:      chaintracker,
+		Broadcaster:       services.Broadcaster,
+		HostingURL:        cfg.Hosting.URL,
+		Storage:           services.Store,
+		ChainTracker:      services.Chaintracks,
 	}
 
 	// Register topic managers for active and whitelisted tokens
-	if err := peer.RegisterTopics(ctx, e, store, nil); err != nil {
+	if err := peer.RegisterTopics(ctx, e, services.Store, activeTopics, nil); err != nil {
 		log.Fatalf("Failed to register topics: %v", err)
 	}
 
@@ -288,12 +219,12 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	// Configure sync settings for all topics using storage-based peer configuration
-	if err := config.ConfigureSync(ctx, e, store.GetQueueStorage(), topicIds); err != nil {
+	if err := sync.ConfigureSync(ctx, e, services.Store.GetQueueStorage(), topicIds); err != nil {
 		log.Printf("Failed to configure sync: %v", err)
 	}
 
 	// Get broadcast peer mapping for transaction submission
-	peerTopics, err := config.GetBroadcastPeerTopics(ctx, store.GetQueueStorage(), topicIds)
+	peerTopics, err := sync.GetBroadcastPeerTopics(ctx, services.Store.GetQueueStorage(), topicIds)
 	if err != nil {
 		log.Printf("Failed to get broadcast peer mapping: %v", err)
 		peerTopics = make(map[string][]string) // Fallback to empty map
@@ -304,7 +235,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	log.Printf("Configured peer broadcaster with %d peers", len(peerTopics))
 
 	// Start GASP sync if requested
-	if SYNC {
+	if syncFlag {
 		go func() {
 			for {
 				log.Println("Starting GASP sync...")
@@ -324,9 +255,9 @@ func runServer(cmd *cobra.Command, args []string) {
 				for topicId := range e.Managers {
 					// Extract tokenId from topic (remove "tm_" prefix)
 					tokenId := topicId[3:]
-					gaspEngine.Managers[topicId] = topics.NewBsv21ValidatedTopicManager(
+					gaspEngine.Managers[topicId] = bsv21topics.NewBsv21ValidatedTopicManager(
 						topicId,
-						store,
+						services.Store,
 						[]string{tokenId},
 					)
 				}
@@ -348,7 +279,7 @@ func runServer(cmd *cobra.Command, args []string) {
 				case <-ctx.Done():
 					log.Println("GASP sync shutting down...")
 					return
-				case <-time.After(5 * time.Minute):
+				case <-time.After(GASPRestartInterval):
 					log.Println("Restarting GASP sync...")
 				}
 			}
@@ -359,7 +290,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			log.Println("Starting SSE sync...")
 
 			// Get SSE peer mapping using the abstracted config
-			ssePeerTopics, sseErr := config.GetSSEPeerTopics(ctx, store.GetQueueStorage(), topicIds)
+			ssePeerTopics, sseErr := sync.GetSSEPeerTopics(ctx, services.Store.GetQueueStorage(), topicIds)
 			if sseErr != nil {
 				log.Printf("Failed to get SSE peer mapping: %v", sseErr)
 				return
@@ -369,7 +300,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			var err error
 			sseSyncManager, err = sync.RegisterSSESync(&sync.SSESyncConfig{
 				Engine:     e,
-				Storage:    store,
+				Storage:    services.Store,
 				PeerTopics: ssePeerTopics,
 				Context:    ctx,
 			})
@@ -380,29 +311,29 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	// Start LibP2P sync if requested
-	if LIBP2P_SYNC {
+	if cfg.Sync.LibP2P {
 		go func() {
 			log.Println("Starting LibP2P sync...")
 
 			// Build topic list for LibP2P sync (whitelist only)
-			queueStore := store.GetQueueStorage()
-			whitelistTokens, libp2pErr := queueStore.SMembers(ctx, constants.KeyWhitelist)
+			queueStore := services.Store.GetQueueStorage()
+			whitelistTokens, libp2pErr := queueStore.SMembers(ctx, []byte(constants.KeyWhitelist))
 			if libp2pErr != nil {
 				log.Printf("Failed to get whitelist for LibP2P sync: %v", libp2pErr)
 				return
 			}
 
-			topics := make([]string, 0, len(whitelistTokens))
+			topicsList := make([]string, 0, len(whitelistTokens))
 			for _, tokenId := range whitelistTokens {
-				topic := "tm_" + tokenId
-				topics = append(topics, topic)
+				topic := "tm_" + string(tokenId)
+				topicsList = append(topicsList, topic)
 			}
 
 			// Register LibP2P sync
 			libp2pSyncManager, err := sync.RegisterLibP2PSync(&sync.LibP2PSyncConfig{
 				Engine:  e,
-				Storage: store,
-				Topics:  topics,
+				Storage: services.Store,
+				Topics:  topicsList,
 				Context: ctx,
 			})
 			if err != nil {
@@ -416,7 +347,7 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	// Start periodic topic registration updates
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(TopicUpdateInterval)
 		defer ticker.Stop()
 
 		log.Println("Starting periodic topic registration updates...")
@@ -427,7 +358,7 @@ func runServer(cmd *cobra.Command, args []string) {
 				log.Println("Topic registration updater shutting down...")
 				return
 			case <-ticker.C:
-				if err := peer.RegisterTopics(ctx, e, store, peerTopics); err != nil {
+				if err := peer.RegisterTopics(ctx, e, services.Store, activeTopics, peerTopics); err != nil {
 					log.Panicf("Failed to update topic registration: %v", err)
 				}
 			}
@@ -436,7 +367,6 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
-		// EnablePrintRoutes: true, // Set this to true to print routes
 		ErrorHandler: server.GetErrorHandler(), // Use overlay services error handler for proper HTTP status codes
 	})
 	app.Use(logger.New())
@@ -448,26 +378,23 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	// Register common 1sat routes
 	routes.RegisterRoutes(onesat, &routes.RoutesConfig{
-		Storage:      store,
-		ChainTracker: chaintracker,
+		Storage:      services.Store,
+		ChainTracker: services.Chaintracks,
 		Engine:       e,
 	})
 
-	// Create SSE manager for streaming
-	sseManager := pubsub.NewSSEManager(ctx, store.GetPubSub())
-
 	// Register SSE streaming routes with BSV21-specific catchup
 	routes.RegisterSSERoutes(onesat, &routes.SSERoutesConfig{
-		SSEManager: sseManager,
-		Catchup:    createBSV21Catchup(store),
+		SSEManager: services.SSEManager,
+		Catchup:    createBSV21Catchup(services.Store),
 		Context:    ctx,
 	})
 
 	// Register BSV21-specific routes
 	bsv21routes.RegisterBSV21Routes(onesat, &bsv21routes.BSV21RoutesConfig{
-		Storage:      store,
-		ChainTracker: chaintracker,
-		Engine:       e,
+		Storage:      services.Store,
+		ChainTracker: services.Chaintracks,
+		ActiveTopics: activeTopics,
 		BSV21Lookup:  bsv21Lookup,
 	})
 
@@ -480,17 +407,15 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	// Register overlay service routes using server pattern (excluding submit route)
 	server.RegisterRoutes(app, &server.RegisterRoutesConfig{
-		ARCAPIKey:        arcAPIKey,
-		ARCCallbackToken: arcToken,
+		ARCAPIKey:        cfg.Arc.APIKey,
+		ARCCallbackToken: cfg.Arc.Token,
 		Engine:           e,
 	})
 
-	// Note: Webhook routes removed - using P2P push notifications instead
-
 	// Start the server in a goroutine
 	go func() {
-		log.Printf("Starting server on port %d...", PORT)
-		if err := app.Listen(fmt.Sprintf(":%d", PORT)); err != nil {
+		log.Printf("Starting server on port %d...", cfg.Server.Port)
+		if err := app.Listen(fmt.Sprintf(":%d", cfg.Server.Port)); err != nil {
 			log.Printf("Server error: %v", err)
 			cancel()
 		}
@@ -499,12 +424,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	// Wait for context cancellation
 	<-ctx.Done()
 
-	// Stop chain tracker P2P if running locally (Arcade implementation)
-	if arcadeInstance, ok := chaintracker.(*arcade.Arcade); ok {
-		if err := arcadeInstance.Stop(); err != nil {
-			log.Printf("Error stopping chain tracker: %v", err)
-		}
-	}
+	// Note: ChainManager P2P subscription stops automatically via context cancellation
 
 	// Shutdown the server
 	log.Println("Shutting down HTTP server...")

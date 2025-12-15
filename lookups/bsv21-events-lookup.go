@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/b-open-io/overlay/queue"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/bitcoin-sv/go-templates/template/bsv21"
 	"github.com/bitcoin-sv/go-templates/template/bsv21/ltm"
@@ -182,16 +183,21 @@ func (l *Bsv21EventsLookup) Lookup(ctx context.Context, question *lookup.LookupQ
 // GetBalance calculates the total balance of BSV21 tokens for given event patterns
 // Balance is always calculated for unspent outputs only
 func (l *Bsv21EventsLookup) GetBalance(ctx context.Context, events []string, topic string) (uint64, int, error) {
-	// Use the storage interface to query for outpoints with the given events
-	question := &storage.EventQuestion{
-		Events:      events,
-		Topic:       topic,
-		UnspentOnly: true, // Balance is always for unspent outputs only
-		From:        0,
-		Limit:       0, // No limit - get all results
+	// Use the OutputStore to query for outputs with the given events
+	store := l.storage.GetStore(topic)
+
+	// Convert events to [][]byte for SearchCfg
+	keys := make([][]byte, len(events))
+	for i, event := range events {
+		keys[i] = []byte(event)
+	}
+	cfg := &queue.SearchCfg{
+		Keys:  keys,
+		Limit: 0, // No limit - get all results
 	}
 
-	results, err := l.storage.LookupOutpoints(ctx, question, true) // include data
+	// Search for unspent outputs only
+	outputs, err := store.SearchOutputs(ctx, cfg, nil, false) // includeSpent=false
 	if err != nil {
 		return 0, 0, err
 	}
@@ -200,24 +206,18 @@ func (l *Bsv21EventsLookup) GetBalance(ctx context.Context, events []string, top
 	count := 0
 
 	// Sum up amounts from BSV21 data
-	for _, result := range results {
-		if result.Data == nil {
+	for _, output := range outputs {
+		if output == nil || output.Data == nil {
 			continue
 		}
 
 		// Access the data structure we control
-		dataMap, ok := result.Data.(map[string]interface{})
+		dataMap, ok := output.Data["bsv21"]
 		if !ok {
 			continue
 		}
 
-		// Extract BSV21 data
-		bsv21DataRaw, ok := dataMap["bsv21"]
-		if !ok {
-			continue
-		}
-
-		bsv21Data, ok := bsv21DataRaw.(map[string]interface{})
+		bsv21Data, ok := dataMap.(map[string]interface{})
 		if !ok {
 			continue
 		}
