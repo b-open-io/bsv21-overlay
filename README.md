@@ -108,7 +108,7 @@ For production or specific requirements, you can configure storage backends:
 # Use MongoDB for events
 export EVENTS_URL=mongodb://user:pass@localhost:27017/bsv21?authSource=admin
 
-# Use Redis for BEEF storage  
+# Use Redis for BEEF storage
 export BEEF_URL=redis://localhost:6379
 
 # Use Redis for queues and pub/sub
@@ -118,6 +118,13 @@ export PUBSUB_URL=redis://localhost:6379
 # Service configuration
 export PORT=3000
 export HOSTING_URL=http://localhost:3000
+
+# Chain tracker configuration (optional)
+# Use a remote chaintracks server instead of running locally
+export CHAINTRACKS_URL=http://chaintracks.example.com:8080
+
+# Bootstrap URL for local chaintracks initialization (only used when CHAINTRACKS_URL is not set)
+export BOOTSTRAP_URL=http://bootstrap.example.com/headers
 ```
 
 ### Running the Service

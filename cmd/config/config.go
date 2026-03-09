@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/b-open-io/bsv21-overlay/constants"
+	"github.com/b-open-io/overlay/beef"
 	"github.com/b-open-io/overlay/config"
 	"github.com/b-open-io/overlay/queue"
 	"github.com/joho/godotenv"
@@ -118,11 +119,13 @@ func init() {
 func getQueueStorage() (queue.QueueStorage, error) {
 	// Create storage using the same configuration as server
 	// Config tool doesn't need headers client since it only manages queue storage
-	store, err := config.CreateEventStorage(eventsURL, beefURL, queueURL, pubsubURL, nil)
-	if err != nil {
+	if beefStore, err := beef.NewStorage(beefURL, nil); err != nil {
+		return nil, fmt.Errorf("failed to create beef storage: %v", err)
+	} else if store, err := config.CreateEventStorage(eventsURL, beefStore, queueURL, pubsubURL, nil); err != nil {
 		return nil, fmt.Errorf("failed to create storage: %v", err)
+	} else {
+		return store.GetQueueStorage(), nil
 	}
-	return store.GetQueueStorage(), nil
 }
 
 func runWhitelistAdd(cmd *cobra.Command, args []string) error {

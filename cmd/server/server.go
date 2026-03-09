@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,14 +19,14 @@ import (
 	"github.com/b-open-io/bsv21-overlay/peer"
 	bsv21routes "github.com/b-open-io/bsv21-overlay/routes"
 	"github.com/b-open-io/bsv21-overlay/topics"
+	"github.com/b-open-io/overlay/beef"
 	"github.com/b-open-io/overlay/config"
-	"github.com/b-open-io/overlay/headers"
-	"github.com/b-open-io/overlay/headers/processor"
-	headersRoutes "github.com/b-open-io/overlay/headers/routes"
 	"github.com/b-open-io/overlay/pubsub"
 	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
 	"github.com/b-open-io/overlay/sync"
+	"github.com/bsv-blockchain/arcade"
+	"github.com/bsv-blockchain/arcade/chaintracks"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/server"
 	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
@@ -36,7 +38,7 @@ import (
 
 // Global variables
 var (
-	chaintracker      *headers.Client
+	chaintracker      arcade.Chaintracks
 	broadcast         *broadcaster.Arc
 	PORT              int
 	PPROF_PORT        string
@@ -51,17 +53,16 @@ var (
 
 // Configuration from flags/env
 var (
-	eventsURL    string
-	beefURL      string
-	queueURL     string
-	pubsubURL    string
-	arcURL       string
-	arcAPIKey    string
-	arcToken     string
-	hostingURL   string
-	headersURL   string
-	headersKey   string
-	webhookToken string
+	eventsURL  string
+	beefURL    string
+	queueURL   string
+	pubsubURL  string
+	arcURL     string
+	arcAPIKey  string
+	arcToken   string
+	hostingURL string
+	network    string
+	logLevel   string
 )
 
 // Command exports the server command for use in the main CLI
@@ -93,12 +94,25 @@ func init() {
 	Command.Flags().StringVar(&arcAPIKey, "arc-key", os.Getenv("ARC_API_KEY"), "Arc API key")
 	Command.Flags().StringVar(&arcToken, "arc-token", os.Getenv("ARC_CALLBACK_TOKEN"), "Arc callback token")
 	Command.Flags().StringVar(&hostingURL, "hosting", os.Getenv("HOSTING_URL"), "Hosting URL")
-	Command.Flags().StringVar(&headersURL, "headers", os.Getenv("HEADERS_URL"), "Block headers service URL")
-	Command.Flags().StringVar(&headersKey, "headers-key", os.Getenv("HEADERS_KEY"), "Block headers API key")
-	Command.Flags().StringVar(&webhookToken, "webhook-token", os.Getenv("WEBHOOK_TOKEN"), "Webhook authentication token")
+	Command.Flags().StringVar(&network, "network", os.Getenv("NETWORK"), "Network (mainnet, testnet, teratestnet)")
+	Command.Flags().StringVar(&logLevel, "loglevel", os.Getenv("LOG_LEVEL"), "Log level (debug, info, warn, error)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
+	// Configure log level
+	var slogLevel slog.Level
+	switch strings.ToLower(logLevel) {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "warn", "warning":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	default:
+		slogLevel = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel})))
+
 	// Apply defaults
 	if PORT == 0 {
 		PORT = 3000
@@ -106,15 +120,30 @@ func runServer(cmd *cobra.Command, args []string) {
 	if arcURL == "" {
 		arcURL = "https://arc.gorillapool.io/v1"
 	}
-	if headersURL == "" {
-		headersURL = "https://mainnet.headers.gorillapool.io"
-	}
 
-	// Set up chain tracker
-	chaintracker = headers.NewClient(headers.ClientParams{
-		Url:    headersURL,
-		ApiKey: headersKey,
-	})
+	// Create a context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Set up chain tracker - use client if CHAINTRACKS_URL is set, otherwise run locally
+	var err error
+	chaintracksURL := os.Getenv("CHAINTRACKS_URL")
+	if chaintracksURL != "" {
+		log.Printf("Using remote arcade server at %s", chaintracksURL)
+		chaintracker = chaintracks.NewClient(chaintracksURL)
+		// Start SSE subscription immediately so GetTip() has cached data
+		// The SSE endpoint sends the current tip on connection
+		chaintracker.SubscribeTip(ctx)
+	} else {
+		log.Println("Running arcade locally")
+		bootstrapURL := os.Getenv("BOOTSTRAP_URL")
+		chaintracker, err = arcade.NewArcade(ctx, arcade.Config{
+			Network:      network,
+			BootstrapURL: bootstrapURL,
+		})
+		if err != nil {
+			log.Fatalf("Failed to initialize chain tracker: %v", err)
+		}
+	}
 
 	broadcast = &broadcaster.Arc{
 		ApiUrl:        arcURL,
@@ -136,9 +165,6 @@ func runServer(cmd *cobra.Command, args []string) {
 			}
 		}()
 	}
-
-	// Create a context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize variables for cleanup
 	var store *storage.EventDataStorage
@@ -187,8 +213,11 @@ func runServer(cmd *cobra.Command, args []string) {
 	}()
 
 	// Create storage using the cleaned up configuration with chaintracker for validation
-	var err error
-	store, err = config.CreateEventStorage(eventsURL, beefURL, queueURL, pubsubURL, chaintracker)
+	beefStore, err := beef.NewStorage(beefURL, nil)
+	if err != nil {
+		log.Fatalf("failed to create beef storage: %v", err)
+	}
+	store, err = config.CreateEventStorage(eventsURL, beefStore, queueURL, pubsubURL, chaintracker)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
@@ -199,8 +228,39 @@ func runServer(cmd *cobra.Command, args []string) {
 		log.Fatalf("Failed to initialize bsv21 lookup: %v", err)
 	}
 
-	// Start headers processor for merkle root reconciliation with 1 minute polling
-	go processor.Start(ctx, chaintracker, store, 1*time.Minute)
+	// Start chain tracker P2P if running locally (Arcade implementation)
+	if arcadeInstance, ok := chaintracker.(*arcade.Arcade); ok {
+		if err := arcadeInstance.Start(ctx); err != nil {
+			log.Fatalf("Failed to start chain tracker: %v", err)
+		}
+	}
+
+	// Subscribe to new block notifications
+	blockChan := chaintracker.SubscribeTip(ctx)
+
+	// Start block processor to handle new blocks from P2P
+	go func() {
+		log.Println("Starting block processor...")
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Block processor shutting down...")
+				return
+			case blockHeader := <-blockChan:
+				if blockHeader == nil {
+					continue
+				}
+
+				log.Printf("New block received: height=%d hash=%s", blockHeader.Height, blockHeader.Hash.String())
+
+				// Reconcile validated merkle roots for this new block
+				if err := store.ReconcileValidatedMerkleRoots(ctx); err != nil {
+					log.Printf("Error reconciling validated outputs: %v", err)
+				}
+			}
+		}
+	}()
 
 	// Initialize engine
 	e = &engine.Engine{
@@ -267,7 +327,6 @@ func runServer(cmd *cobra.Command, args []string) {
 						topicId,
 						store,
 						[]string{tokenId},
-						topics.SyncModeFull,
 					)
 				}
 
@@ -387,7 +446,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	onesat := app.Group("/api/1sat")
 
 	// Register common 1sat routes
-	routes.RegisterCommonRoutes(onesat, &routes.CommonRoutesConfig{
+	routes.RegisterRoutes(onesat, &routes.RoutesConfig{
 		Storage:      store,
 		ChainTracker: chaintracker,
 		Engine:       e,
@@ -421,23 +480,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		Engine:           e,
 	})
 
-	// Register headers webhook route and webhook with block headers service if hosting URL is configured
-	var webhookURL string
-	if hostingURL != "" {
-		headersRoutes.RegisterWebhookRoutes(onesat, headersRoutes.WebhookConfig{
-			HeadersClient: chaintracker,
-			EventStorage:  store,
-			WebhookToken:  webhookToken, // Can be empty string if not configured
-		})
-
-		// Register webhook with block headers service
-		webhookURL = fmt.Sprintf("%s/api/1sat/headers/webhook", hostingURL)
-		if _, err := chaintracker.RegisterWebhook(ctx, webhookURL, webhookToken); err != nil {
-			log.Printf("Failed to register webhook with block headers service: %v", err)
-		} else {
-			log.Printf("Registered webhook with block headers service: %s", webhookURL)
-		}
-	}
+	// Note: Webhook routes removed - using P2P push notifications instead
 
 	// Start the server in a goroutine
 	go func() {
@@ -451,11 +494,10 @@ func runServer(cmd *cobra.Command, args []string) {
 	// Wait for context cancellation
 	<-ctx.Done()
 
-	// Unregister webhook if it was registered
-	if webhookURL != "" {
-		log.Printf("Unregistering webhook: %s", webhookURL)
-		if err := chaintracker.UnregisterWebhook(context.Background(), webhookURL); err != nil {
-			log.Printf("Failed to unregister webhook: %v", err)
+	// Stop chain tracker P2P if running locally (Arcade implementation)
+	if arcadeInstance, ok := chaintracker.(*arcade.Arcade); ok {
+		if err := arcadeInstance.Stop(); err != nil {
+			log.Printf("Error stopping chain tracker: %v", err)
 		}
 	}
 

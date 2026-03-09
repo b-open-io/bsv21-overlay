@@ -9,17 +9,17 @@ import (
 	"github.com/b-open-io/bsv21-overlay/lookups"
 	"github.com/b-open-io/overlay/routes"
 	"github.com/b-open-io/overlay/storage"
+	"github.com/bsv-blockchain/arcade"
 	"github.com/bsv-blockchain/go-overlay-services/pkg/core/engine"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/transaction"
-	"github.com/b-open-io/overlay/headers"
 	"github.com/gofiber/fiber/v2"
 )
 
 // BSV21RoutesConfig holds the configuration for BSV21-specific routes
 type BSV21RoutesConfig struct {
 	Storage      *storage.EventDataStorage
-	ChainTracker *headers.Client
+	ChainTracker arcade.Chaintracks
 	Engine       *engine.Engine
 	BSV21Lookup  *lookups.Bsv21EventsLookup
 }
@@ -86,8 +86,6 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		tokenId := c.Params("tokenId")
 		heightStr := c.Params("height")
 
-		log.Printf("Received block request for BSV21 tokenId: %s at height: %s", tokenId, heightStr)
-
 		// Validate tokenId is active
 		topic := "tm_" + tokenId
 		if _, exists := eng.Managers[topic]; !exists {
@@ -115,7 +113,7 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		}
 
 		// Fetch block header information from chaintracker
-		blockHeader, err := chaintracker.BlockByHeight(c.Context(), height)
+		blockHeader, err := chaintracker.GetHeaderByHeight(c.UserContext(), height)
 		if err != nil {
 			log.Printf("Failed to get block header: %v", err)
 			// Continue without header info rather than failing completely
@@ -132,10 +130,10 @@ func RegisterBSV21Routes(group fiber.Router, config *BSV21RoutesConfig) {
 		// Build response with header and transactions
 		response := fiber.Map{
 			"block": fiber.Map{
-				"height":            height,
+				"height":            blockHeader.Height,
 				"hash":              blockHeader.Hash.String(),
-				"previousblockhash": blockHeader.PreviousBlock.String(),
-				"timestamp":         blockHeader.Timestamp,
+				"previousblockhash": blockHeader.Header.PrevHash.String(),
+				"timestamp":         blockHeader.Header.Timestamp,
 			},
 			"transactions": transactions,
 		}
